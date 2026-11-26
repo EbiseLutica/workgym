@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "workgym": {
+      "source": {
+        "source": "directory",
+        "path": "./"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "tasque-loop@workgym": true
+  }
+}

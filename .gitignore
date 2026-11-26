@@ -1,3 +1,4 @@
 .tasque/
-.claude
+.claude/*
+!.claude/settings.json
 transcripts/
