@@ -27,9 +27,9 @@ export function projectName(projectDir) {
 /**
  * ランの記録を1件にまとめる。承認済みのランでなければ例外。
  * post の試行とレビューは tasks/ の記録から、PR のサイズは tasks/pr.json から、人間の判断は承認済みの契約と reviews.json・escalations.json から取る。
- * 記録がないものは、回数は 0、一覧は空、PR は null にする。
+ * 記録がないものは、回数は 0、一覧は空、PR は null にする。時刻は持たない（台帳のコミット時刻で分かる）。
  */
-export function buildRecord(projectDir, run, { now = new Date() } = {}) {
+export function buildRecord(projectDir, run) {
   const { plan } = loadApproval(projectDir, run);
   const paths = runPaths(projectDir, run);
 
@@ -62,7 +62,6 @@ export function buildRecord(projectDir, run, { now = new Date() } = {}) {
   return {
     project: projectName(projectDir),
     run,
-    recorded_at: now.toISOString(),
     tasks,
     pr: pr?.diff ? { lines: pr.diff.lines, files: pr.diff.files } : null,
     human: {
@@ -75,15 +74,15 @@ export function buildRecord(projectDir, run, { now = new Date() } = {}) {
 
 /**
  * ランを台帳の <project>/<run>/ に書き、そのランのパスだけを台帳のリポジトリにコミットする。承認済みのランでなければ例外。
- * withRecord なら buildRecord の集計を record.json に書く（ランの終わり）。raw/ は .tasque/runs/<run>/ の今の内容に置き換える（コピー元で消えたファイルも消す）。
- * 台帳の record.json がコミット済みなら、何も書かずに例外。台帳がない、または空のディレクトリなら git init する。
- * 中身のあるディレクトリが git リポジトリのルートでなければ例外（既存のディレクトリを勝手に git 管理にしない）。
- * 変化がなければコミットせず committed: false を返す。コミットに失敗したら書いたファイルは残したまま例外にする。原因を確かめてから同じ呼び方でやり直す。
+ * raw/ は .tasque/runs/<run>/ の今の内容に置き換える（コピー元で消えたファイルも消す）。record.json は buildRecord の集計で作り直す。
+ * 台帳がない、または空のディレクトリなら git init する。中身のあるディレクトリが git リポジトリのルートでなければ例外（既存のディレクトリを勝手に git 管理にしない）。
+ * raw/ と record.json を書いたあとでそのランのパスを git add -A し、HEAD と比べて変わりがなければコミットせず committed: false を返す（前回のコミット失敗で残ったファイルも拾う）。
+ * コミットに失敗したら書いたファイルは残したまま例外にする。原因を確かめてから同じ呼び方でやり直す。
  * 名前とメールは台帳のリポジトリの設定を使い、なければ tasque-loop / tasque-loop@localhost にする。
  */
-export function writeRun(dir, projectDir, run, { withRecord = false, now = new Date() } = {}) {
+export function writeRun(dir, projectDir, run) {
   loadApproval(projectDir, run);
-  const summary = withRecord ? buildRecord(projectDir, run, { now }) : null;
+  const summary = buildRecord(projectDir, run);
   const project = projectName(projectDir);
   const rel = `${project}/${run}`;
   const fresh = !existsSync(dir) || readdirSync(dir).length === 0;
@@ -93,29 +92,21 @@ export function writeRun(dir, projectDir, run, { withRecord = false, now = new D
     mkdirSync(dir, { recursive: true });
     git(dir, ["init", "-q"]);
   }
-  if (committed(dir, `${rel}/record.json`)) throw new Error(`台帳に ${rel}/record.json がすでにある（コミット済み）`);
 
   const runDir = join(dir, rel);
   mkdirSync(runDir, { recursive: true });
   rmSync(join(runDir, "raw"), { recursive: true, force: true });
   cpSync(runPaths(projectDir, run).dir, join(runDir, "raw"), { recursive: true });
-  if (summary) writeFileSync(join(runDir, "record.json"), JSON.stringify(summary, null, 2) + "\n");
+  writeFileSync(join(runDir, "record.json"), JSON.stringify(summary, null, 2) + "\n");
 
   try {
     git(dir, ["add", "-A", "--", rel]);
     if (git(dir, ["status", "--porcelain", "--", rel]).trim() === "") return { dir: runDir, committed: false };
-    git(dir, [...identityOptions(dir), "commit", "-q", "-m", `${summary ? "record" : "snapshot"} ${project} ${run}`, "--", rel]);
+    git(dir, [...identityOptions(dir), "commit", "-q", "-m", `record ${project} ${run}`, "--", rel]);
   } catch (e) {
     throw new Error(`台帳のコミットに失敗した。書いたファイルは残してある。原因を確かめてから、同じコマンドをやり直すこと: ${e.message}`);
   }
   return { dir: runDir, committed: true };
-}
-
-/**
- * パス（台帳のリポジトリの / 区切り）が HEAD にコミットされているか。ステージしただけのものは数えない。
- */
-function committed(dir, rel) {
-  return spawnSync("git", ["cat-file", "-e", `HEAD:${rel}`], { cwd: dir }).status === 0;
 }
 
 function assertLedgerRoot(dir) {
