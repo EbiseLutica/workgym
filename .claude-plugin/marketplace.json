@@ -1,0 +1,12 @@
+{
+  "name": "workgym",
+  "description": "LLM に実装を任せつつ最終レビューは人間が持つための Claude Code プラグイン集",
+  "owner": { "name": "Ebise Lutica" },
+  "plugins": [
+    {
+      "name": "tasque-loop",
+      "source": "./plugins/tasque-loop",
+      "description": "タスク契約・許可リストフック・verify・レビュー上限つきの実装ループ"
+    }
+  ]
+}

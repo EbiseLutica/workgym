@@ -1,0 +1,4 @@
+{
+  "test_cmd": { "cmd": "node --test", "cwd": "plugins/tasque-loop" },
+  "command_timeout_sec": 300
+}

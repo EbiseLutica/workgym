@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "run": "2026-11-25-a1b2",
+  "request": "設定ファイル tasque.config.json を読めるようにしてほしい。キーが足りないときは既定値で動くこと。",
+  "base": "main",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "設定ファイルの読み込みを追加",
+      "goal": "tasque.config.json を読み、未指定のキーは既定値で補う",
+      "depends_on": [],
+      "allow": ["src/config/**", "src/index.ts"],
+      "deny": ["src/config/generated/**"],
+      "out_of_scope": [
+        "CLI 引数の追加は T2 でやる",
+        "既存の設定キーの名前は変えない"
+      ],
+      "tests": ["test/config.test.ts"],
+      "acceptance": [
+        { "cmd": "npm test -- config", "why": "既定値の補完と不正値の拒否" }
+      ],
+      "max_diff": { "lines": 150, "files": 4 },
+      "uncertain": [
+        {
+          "q": "設定ファイルが存在しないときにエラーにするか、既定値で動くか",
+          "raised_by": "planner",
+          "decision": null
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "--config 引数で設定ファイルの場所を指定できるようにする",
+      "goal": "CLI 引数 --config <path> で読み込む設定ファイルを差し替えられる",
+      "depends_on": ["T1"],
+      "allow": ["src/cli.ts"],
+      "out_of_scope": ["設定の読み込み処理そのものは変えない"],
+      "tests": ["test/cli.test.ts"],
+      "acceptance": [
+        { "cmd": "npm test -- cli", "why": "--config 指定時と未指定時の読み込み先" }
+      ],
+      "max_diff": { "lines": 60, "files": 2 },
+      "uncertain": []
+    }
+  ]
+}
