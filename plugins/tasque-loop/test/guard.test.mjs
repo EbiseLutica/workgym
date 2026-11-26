@@ -107,12 +107,13 @@ test("大文字小文字が違うパスは allow に一致しないので拒否�
   assert.ok(denied(run(write(join(projectDir, "SRC", "config", "load.ts")))));
 });
 
-test("Edit・Write 以外の書き込み系や Bash は拒否し、読み取り系は通す", () => {
+test("Edit・Write 以外の書き込み系や Bash は拒否し、読み取り系と報告は通す", () => {
   assert.ok(denied(run(call("Bash", { command: "ls" }))));
   assert.ok(denied(run(call("NotebookEdit", { notebook_path: join(projectDir, "src", "config", "a.ipynb") }))));
   assert.ok(denied(run(call("WebFetch", {}))));
   assert.equal(run(call("Read", { file_path: join(projectDir, "README.md") })), null);
   assert.equal(run(call("Grep", { pattern: "x" })), null);
+  assert.equal(run(call("SubagentHandback", { message: "## 結果\n完了" })), null);
 });
 
 test("契約が読めないときは拒否する", () => {

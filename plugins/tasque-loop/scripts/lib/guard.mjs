@@ -12,6 +12,8 @@ const AGENT_PREFIX = "tasque-loop:";
 /** implementer が使ってよいツール。これ以外は理由を問わず拒否する。 */
 const READ_TOOLS = ["Read", "Glob", "Grep"];
 const WRITE_TOOLS = ["Edit", "Write"];
+/** 呼び出し元へ報告を返すためのツール。これを拒否すると報告が届かない。 */
+const REPORT_TOOLS = ["SubagentHandback"];
 
 /**
  * どの階層にあっても tasque-loop のエージェントに書かせない名前（小文字）。
@@ -73,7 +75,7 @@ export function decide(
   }
 
   if (input.agent_type !== IMPLEMENTER) return null;
-  if (READ_TOOLS.includes(tool)) return null;
+  if (READ_TOOLS.includes(tool) || REPORT_TOOLS.includes(tool)) return null;
   if (!WRITE_TOOLS.includes(tool)) return deny(`implementer は ${tool} を使えない`);
 
   const target = writeTarget(input, projectDir, base);
