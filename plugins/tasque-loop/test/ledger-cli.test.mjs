@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ const RECORD_REVIEW = fileURLToPath(new URL("../scripts/record-review.mjs", impo
  * 承認済みのランと、一時ディレクトリの台帳。
  * git のグローバル・システム設定は空にして、台帳のリポジトリに名前とメールの設定がない状態にする。
  * ledgerDir は存在しないパス（CLI が作る）。
+ * 台帳の中のランの置き場所は <台帳>/<プロジェクト>/<run>/ で、集計は record.json、生の記録の写しは raw/。
  */
 async function setup() {
   const repo = await approvableProject();
@@ -29,11 +30,71 @@ async function setup() {
   const spawn = (script, args, e = env) =>
     spawnSync(process.execPath, [script, ...args], { cwd: repo.dir, env: e, encoding: "utf8" });
   const ledger = (args = ["--run", plan.run], e = env) => spawn(CLI, args, e);
+  const snapshot = (e = env) => spawn(CLI, ["--run", plan.run, "--snapshot"], e);
   const lgit = (...args) => execFileSync("git", args, { cwd: ledgerDir, env, encoding: "utf8" });
   const project = basename(repo.root);
-  const recordPath = (dir = ledgerDir) => join(dir, project, `${plan.run}.json`);
-  return { ...repo, plan, tmp, env, spawn, ledger, lgit, ledgerDir, project, recordPath, paths: runPaths(repo.dir, plan.run) };
+  const runRel = `${project}/${plan.run}`;
+  const runDir = (dir = ledgerDir) => join(dir, project, plan.run);
+  const recordPath = (dir = ledgerDir) => join(runDir(dir), "record.json");
+  const rawDir = (dir = ledgerDir) => join(runDir(dir), "raw");
+  return {
+    ...repo,
+    plan,
+    tmp,
+    env,
+    spawn,
+    ledger,
+    snapshot,
+    lgit,
+    ledgerDir,
+    project,
+    runRel,
+    runDir,
+    recordPath,
+    rawDir,
+    paths: runPaths(repo.dir, plan.run),
+  };
 }
+
+/**
+ * ディレクトリの中のファイルを、/ 区切りの相対パスから中身への対応にする（空のディレクトリは数えない）。
+ */
+function tree(root) {
+  const out = {};
+  const walk = (dir, prefix) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(join(dir, e.name), rel);
+      else out[rel] = readFileSync(join(dir, e.name), "utf8");
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
+/**
+ * 台帳のリポジトリで、そのランの置き場所の下に追跡されているファイル（/ 区切り、ソート済み）。
+ */
+function tracked(s) {
+  return s.lgit("ls-files", "--", s.runRel).split("\n").filter(Boolean).sort();
+}
+
+/**
+ * raw/ の写しが追跡されているときの、追跡されるべきファイルの一覧。withRecord なら record.json も含める。
+ */
+function expectedTracked(s, { withRecord }) {
+  const raw = Object.keys(tree(s.paths.dir)).map((rel) => `${s.runRel}/raw/${rel}`);
+  return [...raw, ...(withRecord ? [`${s.runRel}/record.json`] : [])].sort();
+}
+
+/**
+ * 台帳のリポジトリのすべてのコミットで変わったパス。
+ */
+function committedPaths(s) {
+  return s.lgit("log", "--format=", "--name-only").split("\n").filter(Boolean);
+}
+
+const commitCount = (s) => Number(s.lgit("rev-list", "--count", "HEAD").trim());
 
 /**
  * 指摘を1件作る。rejected なら reject_reason も付ける。
@@ -106,6 +167,16 @@ function populate(s) {
   appendEscalation(dir, plan.run, { task: "T2", q: "q2" });
 }
 
+/**
+ * ランの記録を書き換える（1件を変え、1件を足し、1件を消す）。消したファイルは raw/ からも消えるべきもの。
+ */
+function mutate(s) {
+  const tasks = join(s.paths.dir, "tasks");
+  writeFileSync(s.paths.reviews, JSON.stringify([{ at: "2026-11-26T02:00:00.000Z", verdict: "approved", text: "変えた", draft_digest: "d3" }]));
+  writeFileSync(join(tasks, "T2.post-history.json"), JSON.stringify([{ at: "2026-11-26T02:10:00.000Z", ok: true, failed: [], scope_outside: [] }]));
+  rmSync(join(tasks, "T1.post-history.json"));
+}
+
 const isIso = (s) => typeof s === "string" && new Date(s).toISOString() === s;
 const emptyReview = {
   rounds: 0,
@@ -129,12 +200,13 @@ function foundByOf(s) {
   return Object.fromEntries(record.tasks.map((t) => [t.id, t.review.found_by]));
 }
 
-// ---- 正常系: 台帳に記録される ----
+// ---- 正常系: --run で台帳に記録される ----
 
-test("正常系: ランの記録を1件の JSON にまとめて台帳に書き、台帳のリポジトリにコミットする", async () => {
+test("正常系: --run はランの集計を <プロジェクト>/<run>/record.json に、.tasque/runs/<run>/ の写しを raw/ に書き、両方を台帳のリポジトリにコミットする", async () => {
   const s = await setup();
   populate(s);
   const projectStatus = s.git("status", "--porcelain");
+  const source = tree(s.paths.dir);
 
   const r = s.ledger();
   assert.equal(r.status, 0, r.stderr);
@@ -185,13 +257,36 @@ test("正常系: ランの記録を1件の JSON にまとめて台帳に書き�
     },
   });
 
-  assert.equal(s.lgit("rev-list", "--count", "HEAD").trim(), "1");
+  assert.deepEqual(tree(s.rawDir()), source);
+  assert.equal(existsSync(join(s.ledgerDir, s.project, `${s.plan.run}.json`)), false);
+
+  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
+  assert.ok(s.lgit("show", "--name-only", "--format=", "HEAD").split("\n").includes(`${s.runRel}/record.json`));
+  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
-  assert.deepEqual(s.lgit("show", "--name-only", "--format=", "HEAD").trim().split("\n"), [`${s.project}/${s.plan.run}.json`]);
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
   assert.equal(s.lgit("remote").trim(), "");
 
   assert.equal(s.git("status", "--porcelain"), projectStatus);
+});
+
+test("正常系: --snapshot の後でランの記録が変わっていても、--run は raw/ を最新の内容（消えたファイルは消す）にしてから record.json を書く", async () => {
+  const s = await setup();
+  populate(s);
+  const snap = s.snapshot();
+  assert.equal(snap.status, 0, snap.stderr);
+
+  mutate(s);
+  const r = s.ledger();
+  assert.equal(r.status, 0, r.stderr);
+
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.equal(existsSync(join(s.rawDir(), "tasks", "T1.post-history.json")), false);
+  const record = JSON.parse(readFileSync(s.recordPath(), "utf8"));
+  assert.deepEqual(record.human.reviews, [{ at: "2026-11-26T02:00:00.000Z", verdict: "approved", text: "変えた" }]);
+
+  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
 });
 
 test("正常系: 出どころ別の集計は1ラウンド目の指摘だけを、両方・並列だけ・1体だけに分けて数え、それぞれの却下を数える", async () => {
@@ -243,8 +338,9 @@ test("正常系: found_by のない古い指摘（変更前の review-1.json）�
   });
 });
 
-test("正常系: 台帳のリポジトリに名前とメールの設定があればそれを使い、記録のファイルだけをコミットする", async () => {
+test("正常系: 台帳のリポジトリに名前とメールの設定があればそれを使い、そのランのパスだけをコミットする", async () => {
   const s = await setup();
+  populate(s);
   mkdirSync(s.ledgerDir, { recursive: true });
   s.lgit("init", "-q");
   s.lgit("config", "user.name", "ledger-owner");
@@ -255,7 +351,8 @@ test("正常系: 台帳のリポジトリに名前とメールの設定があれ
   assert.equal(r.status, 0, r.stderr);
 
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "ledger-owner <owner@example.invalid>");
-  assert.deepEqual(s.lgit("show", "--name-only", "--format=", "HEAD").trim().split("\n"), [`${s.project}/${s.plan.run}.json`]);
+  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
+  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("status", "--porcelain").trim(), "?? memo.txt");
 });
 
@@ -281,8 +378,9 @@ test("正常系: TASQUE_LEDGER_DIR がなければ ~/.tasque/ledger に書く。
     assert.deepEqual(t.scope_violations, []);
     assert.deepEqual(t.review, emptyReview);
   }
-  const log = execFileSync("git", ["log", "--format=%H"], { cwd: ledgerDir, env: s.env, encoding: "utf8" });
-  assert.equal(log.trim().split("\n").length, 1);
+  assert.deepEqual(tree(s.rawDir(ledgerDir)), tree(s.paths.dir));
+  const status = execFileSync("git", ["status", "--porcelain"], { cwd: ledgerDir, env: s.env, encoding: "utf8" });
+  assert.equal(status.trim(), "");
 });
 
 test("正常系: 台帳の場所が空のディレクトリなら git init して使う", async () => {
@@ -290,42 +388,146 @@ test("正常系: 台帳の場所が空のディレクトリなら git init し�
   mkdirSync(s.ledgerDir, { recursive: true });
   const ok = s.ledger();
   assert.equal(ok.status, 0, ok.stderr);
-  assert.equal(s.lgit("rev-list", "--count", "HEAD").trim(), "1");
+  assert.ok(commitCount(s) >= 1);
+  assert.ok(existsSync(s.recordPath()));
+});
+
+// ---- 正常系: --snapshot で raw/ だけを置き換える ----
+
+test("正常系: --snapshot は .tasque/runs/<run>/ の写しを raw/ に書いてコミットし、record.json は書かない", async () => {
+  const s = await setup();
+  populate(s);
+  const projectStatus = s.git("status", "--porcelain");
+
+  const r = s.snapshot();
+  assert.equal(r.status, 0, r.stderr);
+
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.equal(existsSync(s.recordPath()), false);
+  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: false }));
+  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/raw/`)), committedPaths(s).join("\n"));
+  assert.equal(commitCount(s), 1);
+  assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+  assert.equal(s.lgit("remote").trim(), "");
+
+  assert.equal(s.git("status", "--porcelain"), projectStatus);
+});
+
+test("正常系: --snapshot を繰り返すと、変わった・増えたファイルを反映し、コピー元で消えたファイルは raw/ からも消してコミットする", async () => {
+  const s = await setup();
+  populate(s);
+  assert.equal(s.snapshot().status, 0);
+  const before = commitCount(s);
+
+  mutate(s);
+  const r = s.snapshot();
+  assert.equal(r.status, 0, r.stderr);
+
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.equal(existsSync(join(s.rawDir(), "tasks", "T1.post-history.json")), false);
+  assert.equal(commitCount(s), before + 1);
+  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: false }));
+  assert.ok(
+    s.lgit("show", "--name-only", "--format=", "HEAD").split("\n").filter(Boolean).every((p) => p.startsWith(`${s.runRel}/raw/`)),
+  );
+  assert.equal(existsSync(s.recordPath()), false);
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+});
+
+test("正常系: --snapshot は中身が変わっていなければコミットせずに exit 0", async () => {
+  const s = await setup();
+  populate(s);
+  assert.equal(s.snapshot().status, 0);
+  const head = s.lgit("rev-parse", "HEAD").trim();
+
+  const r = s.snapshot();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+});
+
+test("正常系: --snapshot も台帳のリポジトリにある無関係のファイルには触れず、そのランのパスだけをコミットする", async () => {
+  const s = await setup();
+  populate(s);
+  mkdirSync(s.ledgerDir, { recursive: true });
+  s.lgit("init", "-q");
+  s.lgit("config", "user.name", "ledger-owner");
+  s.lgit("config", "user.email", "owner@example.invalid");
+  writeFileSync(join(s.ledgerDir, "memo.txt"), "手元のメモ\n");
+
+  const r = s.snapshot();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "ledger-owner <owner@example.invalid>");
+  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/raw/`)), committedPaths(s).join("\n"));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "?? memo.txt");
 });
 
 // ---- 異常系: 台帳に何も書かない ----
 
-test("異常系: 同じランがすでに台帳にあればエラーにし、記録もコミットも変えない", async () => {
+test("異常系: --run は record.json がすでにあればエラーにし、record.json も raw/ もコミットも変えない", async () => {
   const s = await setup();
   populate(s);
   assert.equal(s.ledger().status, 0);
-  const before = readFileSync(s.recordPath(), "utf8");
+  const record = readFileSync(s.recordPath(), "utf8");
+  const raw = tree(s.rawDir());
+  const head = s.lgit("rev-parse", "HEAD").trim();
 
+  mutate(s);
   const r = s.ledger();
   assert.equal(r.status, 1);
-  assert.equal(readFileSync(s.recordPath(), "utf8"), before);
-  assert.equal(s.lgit("rev-list", "--count", "HEAD").trim(), "1");
+  assert.equal(readFileSync(s.recordPath(), "utf8"), record);
+  assert.deepEqual(tree(s.rawDir()), raw);
+  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
 });
 
-test("異常系: --run がなければ使い方を出して exit 2 で止まり、承認されていないランはエラーにして台帳に何も書かない", async () => {
+test("異常系: --snapshot は record.json がすでにある（ランが終わっている）ならエラーにし、raw/ もコミットも変えない", async () => {
+  const s = await setup();
+  populate(s);
+  assert.equal(s.ledger().status, 0);
+  const raw = tree(s.rawDir());
+  const head = s.lgit("rev-parse", "HEAD").trim();
+
+  mutate(s);
+  const r = s.snapshot();
+  assert.equal(r.status, 1);
+  assert.deepEqual(tree(s.rawDir()), raw);
+  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+});
+
+test("異常系: --run がなければ使い方を出して exit 2 で止まり、承認されていないランは --run でも --snapshot でもエラーにして台帳に何も書かない", async () => {
   const s = await setup();
   const usage = s.ledger([]);
   assert.equal(usage.status, 2);
   assert.match(usage.stderr, /usage/);
 
+  const snapUsage = s.ledger(["--snapshot"]);
+  assert.equal(snapUsage.status, 2);
+  assert.match(snapUsage.stderr, /usage/);
+
   const r = s.ledger(["--run", "2026-01-01-none"]);
   assert.equal(r.status, 1);
+  const snap = s.ledger(["--run", "2026-01-01-none", "--snapshot"]);
+  assert.equal(snap.status, 1);
+  assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none")), false);
   assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none.json")), false);
 });
 
-test("異常系: 台帳の場所が中身のある git 管理外のディレクトリなら、何も書かずにエラーにする", async () => {
+test("異常系: 台帳の場所が中身のある git 管理外のディレクトリなら、--run でも --snapshot でも何も書かずにエラーにする", async () => {
   const s = await setup();
+  populate(s);
   const other = join(s.tmp, "notes");
   mkdirSync(other);
   writeFileSync(join(other, "memo.txt"), "手元のメモ\n");
-  const r = s.ledger(["--run", s.plan.run], { ...s.env, TASQUE_LEDGER_DIR: other });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /git リポジトリのルートでない/);
+  const otherEnv = { ...s.env, TASQUE_LEDGER_DIR: other };
+
+  for (const r of [s.ledger(["--run", s.plan.run], otherEnv), s.snapshot(otherEnv)]) {
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /git リポジトリのルートでない/);
+  }
   assert.equal(existsSync(join(other, ".git")), false);
   assert.equal(existsSync(join(other, s.project)), false);
 });

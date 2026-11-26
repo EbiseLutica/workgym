@@ -1,17 +1,19 @@
-// 使い方: node ledger.mjs --run <run>
-// 承認済みのランの記録（post の試行、レビュー、PR のサイズ、人間の判断）を1件の JSON にまとめ、
-// 台帳の <プロジェクト>/<run>.json に書いて、台帳のリポジトリにそのファイルだけをコミットする。
+// 使い方: node ledger.mjs --run <run> [--snapshot]
+// 承認済みのランを台帳の <プロジェクト>/<run>/ に書き、台帳のリポジトリにそのランのパスだけをコミットする。
+// --run は raw/（.tasque/runs/<run>/ の写し）と record.json（記録の集計）を書く。
+// --snapshot は raw/ だけを今の内容にし、中身が変わっていなければコミットせずに exit 0。
 // 台帳は TASQUE_LEDGER_DIR、なければ ~/.tasque/ledger。なければ作って git init する（remote は足さない）。
-// 承認済みのランが読めない、または台帳に同じランがすでにあるときは、何も書かずに exit 1。
+// 承認済みのランが読めない、台帳の場所が使えない、または record.json が台帳にコミット済みのときは、何も書かずに exit 1。
 import { parseArgs } from "node:util";
 import { cliProjectDir } from "./lib/git.mjs";
-import { buildRecord, commitRecord, ledgerDir } from "./lib/ledger.mjs";
+import { ledgerDir, writeRun } from "./lib/ledger.mjs";
 
-const usage = "usage: ledger.mjs --run <run>";
+const usage = "usage: ledger.mjs --run <run> [--snapshot]";
 
 const { values } = parseArgs({
   options: {
     run: { type: "string" },
+    snapshot: { type: "boolean" },
   },
 });
 
@@ -21,9 +23,9 @@ if (!values.run) {
 }
 
 try {
-  const record = buildRecord(cliProjectDir(), values.run);
-  const file = commitRecord(ledgerDir(), record);
-  console.log(`recorded: ${file}`);
+  const { dir, committed } = writeRun(ledgerDir(), cliProjectDir(), values.run, { withRecord: !values.snapshot });
+  if (!values.snapshot) console.log(`recorded: ${dir}`);
+  else console.log(committed ? `snapshot: ${dir}` : `snapshot: 変化なし（コミットしない） ${dir}`);
 } catch (e) {
   console.error(e.message);
   process.exit(1);
