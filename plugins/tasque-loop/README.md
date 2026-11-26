@@ -18,17 +18,17 @@
 5. 人間が承認したら、メインエージェントが人間の言葉をそのまま `uncertain` の `decision` に書き、`approve.mjs` で承認する。続けて、契約の `tests` に挙げたパスだけを明示してテストをコミットする
 6. タスクごとに、`verify --phase pre` → implementer が実装 → `verify --phase post` → 観点別の reviewer によるレビュー（最大2ラウンド）→ 1タスク1コミット
 7. 全タスクが終わったら `verify --phase pr` を通し、PR を作る。セッションはワークツリーに残ったまま終わる
-8. PR がマージかクローズされたら `/tasque-loop:clean` で片付ける。`.tasque/`（git に無視されている）を元のチェックアウトの `.tasque/archive/<ワークツリー名>/` に退避してから、ワークツリーとブランチを消す（`scripts/worktrees.mjs`）
+8. ワークツリーの削除はハーネス（Claude Code のセッションのアーカイブなど）に任せる。`.tasque/`（git に無視されている）はワークツリーと一緒に消えるので、承認後の記録は区切りごとに台帳へ写す
 
 ## 記録
 
-ランの実行中に、次のスクリプトが `.tasque/runs/<run>/` に記録を残します。最後に `ledger.mjs` がそれらをローカル台帳（`TASQUE_LEDGER_DIR`、なければ `~/.tasque/ledger`。remote のない独立した git リポジトリ）にコミットします。台帳では1ランが1ディレクトリになり、`raw/`（`.tasque/runs/<run>/` の写し）と `record.json`（集計）が入ります。run スキルは区切りのたびに `ledger.mjs --run <run> --snapshot` で `raw/` を今の内容に更新します。
+ランの実行中に、次のスクリプトが `.tasque/runs/<run>/` に記録を残します。`ledger.mjs` がそれらをローカル台帳（`TASQUE_LEDGER_DIR`、なければ `~/.tasque/ledger`。remote のない独立した git リポジトリ）にコミットします。台帳では1ランが1ディレクトリになり、`raw/`（`.tasque/runs/<run>/` の写し）と `record.json`（集計）が入ります。run スキルは区切りのたびに `ledger.mjs --run <run>` を呼び、呼ぶたびに `raw/` と `record.json` を今の内容にします。変化がなければコミットしません。
 
 - `review-feedback.mjs --verdict changes_requested|approved --text-file <パス>`: 契約の下書きへの人間のレビュー（原文）
 - `escalate.mjs` / `answer.mjs --answer-file <パス>`: implementer のエスカレーションと人間の回答
 - `record-review.mjs --run <run> --task <id> --round <1|2> --findings-file <パス>`: reviewer の指摘とその扱い
 - `verify --phase post`: post の試行履歴（`tasks/<id>.post-history.json`）
-- `ledger.mjs --run <run>`: 台帳へのランの記録（`raw/` と `record.json`）。`--snapshot` を付けると `raw/` だけを今の内容に更新し、中身が変わっていればコミットする。`record.json` がコミット済みなら exit 1
+- `ledger.mjs --run <run>`: 台帳へのランの記録（`raw/` と `record.json`）。呼ぶたびに今の内容に置き換えて、変化があればそのランのパスだけをコミットする。承認済みでない、台帳が使えない、コミットに失敗したときは exit 1。コミットに失敗したら、もう一度呼べばその時点の内容でコミットされる
 
 人間や LLM の文章は、シェルで展開されないようにファイルで渡します。
 

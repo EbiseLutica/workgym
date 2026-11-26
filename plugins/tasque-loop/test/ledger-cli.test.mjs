@@ -30,7 +30,6 @@ async function setup() {
   const spawn = (script, args, e = env) =>
     spawnSync(process.execPath, [script, ...args], { cwd: repo.dir, env: e, encoding: "utf8" });
   const ledger = (args = ["--run", plan.run], e = env) => spawn(CLI, args, e);
-  const snapshot = (e = env) => spawn(CLI, ["--run", plan.run, "--snapshot"], e);
   const lgit = (...args) => execFileSync("git", args, { cwd: ledgerDir, env, encoding: "utf8" });
   const project = basename(repo.root);
   const runRel = `${project}/${plan.run}`;
@@ -44,7 +43,6 @@ async function setup() {
     env,
     spawn,
     ledger,
-    snapshot,
     lgit,
     ledgerDir,
     project,
@@ -80,11 +78,11 @@ function tracked(s) {
 }
 
 /**
- * raw/ の写しが追跡されているときの、追跡されるべきファイルの一覧。withRecord なら record.json も含める。
+ * 追跡されるべきファイルの一覧（.tasque/runs/<run>/ の今の中身の写しと record.json）。
  */
-function expectedTracked(s, { withRecord }) {
+function expectedTracked(s) {
   const raw = Object.keys(tree(s.paths.dir)).map((rel) => `${s.runRel}/raw/${rel}`);
-  return [...raw, ...(withRecord ? [`${s.runRel}/record.json`] : [])].sort();
+  return [...raw, `${s.runRel}/record.json`].sort();
 }
 
 /**
@@ -94,7 +92,26 @@ function committedPaths(s) {
   return s.lgit("log", "--format=", "--name-only").split("\n").filter(Boolean);
 }
 
+/**
+ * HEAD のコミットで変わったパス。
+ */
+function headPaths(s) {
+  return s.lgit("show", "--name-only", "--format=", "HEAD").split("\n").filter(Boolean);
+}
+
 const commitCount = (s) => Number(s.lgit("rev-list", "--count", "HEAD").trim());
+
+/**
+ * 台帳のリポジトリを先に作り、コミットが必ず失敗するように pre-commit フックを置く。フックを消す関数を返す。
+ */
+function breakLedgerCommit(s) {
+  mkdirSync(s.ledgerDir, { recursive: true });
+  s.lgit("init", "-q");
+  const hook = join(s.ledgerDir, ".git", "hooks", "pre-commit");
+  mkdirSync(join(hook, ".."), { recursive: true });
+  writeFileSync(hook, "#!/bin/sh\necho 'commit blocked by test' >&2\nexit 1\n", { mode: 0o755 });
+  return () => rmSync(hook);
+}
 
 /**
  * 指摘を1件作る。rejected なら reject_reason も付ける。
@@ -177,7 +194,6 @@ function mutate(s) {
   rmSync(join(tasks, "T1.post-history.json"));
 }
 
-const isIso = (s) => typeof s === "string" && new Date(s).toISOString() === s;
 const emptyReview = {
   rounds: 0,
   by_severity: { blocker: 0, major: 0, minor: 0, nit: 0 },
@@ -211,10 +227,9 @@ test("正常系: --run はランの集計を <プロジェクト>/<run>/record.j
   const r = s.ledger();
   assert.equal(r.status, 0, r.stderr);
 
+  // record.json は raw/ だけから決まるので、記録の時刻（recorded_at）は持たない
   const record = JSON.parse(readFileSync(s.recordPath(), "utf8"));
-  assert.ok(isIso(record.recorded_at), record.recorded_at);
-  const { recorded_at, ...rest } = record;
-  assert.deepEqual(rest, {
+  assert.deepEqual(record, {
     project: s.project,
     run: s.plan.run,
     tasks: [
@@ -260,21 +275,34 @@ test("正常系: --run はランの集計を <プロジェクト>/<run>/record.j
   assert.deepEqual(tree(s.rawDir()), source);
   assert.equal(existsSync(join(s.ledgerDir, s.project, `${s.plan.run}.json`)), false);
 
-  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
-  assert.ok(s.lgit("show", "--name-only", "--format=", "HEAD").split("\n").includes(`${s.runRel}/record.json`));
+  assert.deepEqual(tracked(s), expectedTracked(s));
+  assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
   assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
+  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
   assert.equal(s.lgit("remote").trim(), "");
 
   assert.equal(s.git("status", "--porcelain"), projectStatus);
 });
 
-test("正常系: --snapshot の後でランの記録が変わっていても、--run は raw/ を最新の内容（消えたファイルは消す）にしてから record.json を書く", async () => {
+test("正常系: 記録がまだ少ない承認直後でも --run は raw/ と record.json を書いてコミットする（record.json は途中でも作られる）", async () => {
+  const s = await setup();
+
+  const r = s.ledger();
+  assert.equal(r.status, 0, r.stderr);
+
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.ok(existsSync(s.recordPath()));
+  assert.deepEqual(tracked(s), expectedTracked(s));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+});
+
+test("正常系: --run を繰り返すと、raw/ を最新の内容（コピー元で消えたファイルは消す）に置き換え、record.json を作り直してコミットする", async () => {
   const s = await setup();
   populate(s);
-  const snap = s.snapshot();
-  assert.equal(snap.status, 0, snap.stderr);
+  assert.equal(s.ledger().status, 0);
+  const before = commitCount(s);
 
   mutate(s);
   const r = s.ledger();
@@ -284,8 +312,41 @@ test("正常系: --snapshot の後でランの記録が変わっていても、-
   assert.equal(existsSync(join(s.rawDir(), "tasks", "T1.post-history.json")), false);
   const record = JSON.parse(readFileSync(s.recordPath(), "utf8"));
   assert.deepEqual(record.human.reviews, [{ at: "2026-11-26T02:00:00.000Z", verdict: "approved", text: "変えた" }]);
+  assert.deepEqual(
+    record.tasks.map((t) => t.post),
+    [
+      { attempts: 0, failed: [] },
+      { attempts: 1, failed: [[]] },
+    ],
+  );
 
-  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
+  assert.equal(commitCount(s), before + 1);
+  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
+  assert.ok(headPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), headPaths(s).join("\n"));
+  assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
+  assert.ok(headPaths(s).includes(`${s.runRel}/raw/tasks/T1.post-history.json`));
+  assert.deepEqual(tracked(s), expectedTracked(s));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
+});
+
+test("正常系: ランの記録が変わっていなければ、--run はコミットせず、その旨を出力して exit 0（record.json だけが変わるコミットもしない）", async () => {
+  const s = await setup();
+  populate(s);
+  const first = s.ledger();
+  assert.equal(first.status, 0, first.stderr);
+  const head = s.lgit("rev-parse", "HEAD").trim();
+  const record = readFileSync(s.recordPath(), "utf8");
+
+  // 時刻の分解能より確実に後で呼ぶ
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const r = s.ledger();
+  assert.equal(r.status, 0, r.stderr);
+  assert.notEqual(r.stdout.trim(), "");
+  assert.notEqual(r.stdout, first.stdout);
+
+  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
+  assert.equal(readFileSync(s.recordPath(), "utf8"), record);
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
 });
 
@@ -338,7 +399,7 @@ test("正常系: found_by のない古い指摘（変更前の review-1.json）�
   });
 });
 
-test("正常系: 台帳のリポジトリに名前とメールの設定があればそれを使い、そのランのパスだけをコミットする", async () => {
+test("正常系: 台帳のリポジトリに名前とメールの設定があればそれを使い、無関係のファイルや別のランの未コミットのファイルには触れず、そのランのパスだけをコミットする", async () => {
   const s = await setup();
   populate(s);
   mkdirSync(s.ledgerDir, { recursive: true });
@@ -346,14 +407,20 @@ test("正常系: 台帳のリポジトリに名前とメールの設定があれ
   s.lgit("config", "user.name", "ledger-owner");
   s.lgit("config", "user.email", "owner@example.invalid");
   writeFileSync(join(s.ledgerDir, "memo.txt"), "手元のメモ\n");
+  const otherRun = join(s.ledgerDir, s.project, "2026-01-01-other", "raw");
+  mkdirSync(otherRun, { recursive: true });
+  writeFileSync(join(otherRun, "reviews.json"), "[]\n");
 
   const r = s.ledger();
   assert.equal(r.status, 0, r.stderr);
 
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "ledger-owner <owner@example.invalid>");
-  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: true }));
+  assert.deepEqual(tracked(s), expectedTracked(s));
   assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
-  assert.equal(s.lgit("status", "--porcelain").trim(), "?? memo.txt");
+  assert.deepEqual(
+    s.lgit("status", "--porcelain", "-uall").split("\n").filter(Boolean).sort(),
+    [`?? ${s.project}/2026-01-01-other/raw/reviews.json`, "?? memo.txt"].sort(),
+  );
 });
 
 test("正常系: TASQUE_LEDGER_DIR がなければ ~/.tasque/ledger に書く。記録がないランは空の値で書く", async () => {
@@ -392,142 +459,91 @@ test("正常系: 台帳の場所が空のディレクトリなら git init し�
   assert.ok(existsSync(s.recordPath()));
 });
 
-// ---- 正常系: --snapshot で raw/ だけを置き換える ----
+// ---- 台帳へのコミットに失敗したとき（#3 の流れ） ----
 
-test("正常系: --snapshot は .tasque/runs/<run>/ の写しを raw/ に書いてコミットし、record.json は書かない", async () => {
+test("異常系→やり直し: 台帳へのコミットに失敗したら exit 1 で、書いた raw/ と record.json は戻さない。ランの記録が変わらないままもう一度 --run を呼ぶと、残っていた record.json を含めてコミットされる", async () => {
   const s = await setup();
   populate(s);
-  const projectStatus = s.git("status", "--porcelain");
+  const unbreak = breakLedgerCommit(s);
 
-  const r = s.snapshot();
+  const failed = s.ledger();
+  assert.equal(failed.status, 1);
+  assert.notEqual(failed.stderr.trim(), "");
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  assert.ok(existsSync(s.recordPath()));
+  assert.equal(spawnSync("git", ["rev-parse", "-q", "--verify", "HEAD"], { cwd: s.ledgerDir, env: s.env }).status === 0, false);
+
+  unbreak();
+  const r = s.ledger();
   assert.equal(r.status, 0, r.stderr);
 
-  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
-  assert.equal(existsSync(s.recordPath()), false);
-  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: false }));
-  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/raw/`)), committedPaths(s).join("\n"));
-  assert.equal(commitCount(s), 1);
-  assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
-  assert.equal(s.lgit("status", "--porcelain").trim(), "");
-  assert.equal(s.lgit("remote").trim(), "");
-
-  assert.equal(s.git("status", "--porcelain"), projectStatus);
-});
-
-test("正常系: --snapshot を繰り返すと、変わった・増えたファイルを反映し、コピー元で消えたファイルは raw/ からも消してコミットする", async () => {
-  const s = await setup();
-  populate(s);
-  assert.equal(s.snapshot().status, 0);
-  const before = commitCount(s);
-
-  mutate(s);
-  const r = s.snapshot();
-  assert.equal(r.status, 0, r.stderr);
-
-  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
-  assert.equal(existsSync(join(s.rawDir(), "tasks", "T1.post-history.json")), false);
-  assert.equal(commitCount(s), before + 1);
-  assert.deepEqual(tracked(s), expectedTracked(s, { withRecord: false }));
-  assert.ok(
-    s.lgit("show", "--name-only", "--format=", "HEAD").split("\n").filter(Boolean).every((p) => p.startsWith(`${s.runRel}/raw/`)),
-  );
-  assert.equal(existsSync(s.recordPath()), false);
+  assert.deepEqual(tracked(s), expectedTracked(s));
+  assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
+  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
 });
 
-test("正常系: --snapshot は中身が変わっていなければコミットせずに exit 0", async () => {
+test("異常系→やり直し: 一度コミットした後に台帳へのコミットが失敗し、その間にランの記録が変わっても、もう一度 --run を呼べばその時点の内容（record.json を含む）でコミットされる", async () => {
   const s = await setup();
   populate(s);
-  assert.equal(s.snapshot().status, 0);
+  assert.equal(s.ledger().status, 0);
   const head = s.lgit("rev-parse", "HEAD").trim();
 
-  const r = s.snapshot();
-  assert.equal(r.status, 0, r.stderr);
+  const hook = join(s.ledgerDir, ".git", "hooks", "pre-commit");
+  mkdirSync(join(hook, ".."), { recursive: true });
+  writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  mutate(s);
+  const failed = s.ledger();
+  assert.equal(failed.status, 1);
   assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
-  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
-  assert.equal(s.lgit("status", "--porcelain").trim(), "");
-});
 
-test("正常系: --snapshot も台帳のリポジトリにある無関係のファイルには触れず、そのランのパスだけをコミットする", async () => {
-  const s = await setup();
-  populate(s);
-  mkdirSync(s.ledgerDir, { recursive: true });
-  s.lgit("init", "-q");
-  s.lgit("config", "user.name", "ledger-owner");
-  s.lgit("config", "user.email", "owner@example.invalid");
-  writeFileSync(join(s.ledgerDir, "memo.txt"), "手元のメモ\n");
-
-  const r = s.snapshot();
+  // 失敗とやり直しの間にも記録が増える
+  writeFileSync(join(s.paths.dir, "tasks", "T2.review-1.json"), JSON.stringify({ run: s.plan.run, task: "T2", round: 1, recorded_at: "2026-11-26T03:00:00.000Z", findings: [] }));
+  rmSync(hook);
+  const r = s.ledger();
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "ledger-owner <owner@example.invalid>");
-  assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/raw/`)), committedPaths(s).join("\n"));
-  assert.equal(s.lgit("status", "--porcelain").trim(), "?? memo.txt");
+
+  assert.notEqual(s.lgit("rev-parse", "HEAD").trim(), head);
+  assert.deepEqual(tree(s.rawDir()), tree(s.paths.dir));
+  const committedRecord = JSON.parse(s.lgit("show", `HEAD:${s.runRel}/record.json`));
+  assert.deepEqual(committedRecord.human.reviews, [{ at: "2026-11-26T02:00:00.000Z", verdict: "approved", text: "変えた" }]);
+  assert.equal(committedRecord.tasks[1].review.rounds, 1);
+  assert.deepEqual(tracked(s), expectedTracked(s));
+  assert.equal(s.lgit("status", "--porcelain").trim(), "");
 });
 
 // ---- 異常系: 台帳に何も書かない ----
 
-test("異常系: --run は record.json がすでにあればエラーにし、record.json も raw/ もコミットも変えない", async () => {
-  const s = await setup();
-  populate(s);
-  assert.equal(s.ledger().status, 0);
-  const record = readFileSync(s.recordPath(), "utf8");
-  const raw = tree(s.rawDir());
-  const head = s.lgit("rev-parse", "HEAD").trim();
-
-  mutate(s);
-  const r = s.ledger();
-  assert.equal(r.status, 1);
-  assert.equal(readFileSync(s.recordPath(), "utf8"), record);
-  assert.deepEqual(tree(s.rawDir()), raw);
-  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
-  assert.equal(s.lgit("status", "--porcelain").trim(), "");
-});
-
-test("異常系: --snapshot は record.json がすでにある（ランが終わっている）ならエラーにし、raw/ もコミットも変えない", async () => {
-  const s = await setup();
-  populate(s);
-  assert.equal(s.ledger().status, 0);
-  const raw = tree(s.rawDir());
-  const head = s.lgit("rev-parse", "HEAD").trim();
-
-  mutate(s);
-  const r = s.snapshot();
-  assert.equal(r.status, 1);
-  assert.deepEqual(tree(s.rawDir()), raw);
-  assert.equal(s.lgit("rev-parse", "HEAD").trim(), head);
-  assert.equal(s.lgit("status", "--porcelain").trim(), "");
-});
-
-test("異常系: --run がなければ使い方を出して exit 2 で止まり、承認されていないランは --run でも --snapshot でもエラーにして台帳に何も書かない", async () => {
+test("異常系: --run がなければ使い方を出して exit 2 で止まり、承認されていないランはエラーにして台帳に何も書かない", async () => {
   const s = await setup();
   const usage = s.ledger([]);
   assert.equal(usage.status, 2);
   assert.match(usage.stderr, /usage/);
 
-  const snapUsage = s.ledger(["--snapshot"]);
-  assert.equal(snapUsage.status, 2);
-  assert.match(snapUsage.stderr, /usage/);
-
   const r = s.ledger(["--run", "2026-01-01-none"]);
   assert.equal(r.status, 1);
-  const snap = s.ledger(["--run", "2026-01-01-none", "--snapshot"]);
-  assert.equal(snap.status, 1);
   assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none")), false);
   assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none.json")), false);
 });
 
-test("異常系: 台帳の場所が中身のある git 管理外のディレクトリなら、--run でも --snapshot でも何も書かずにエラーにする", async () => {
+test("異常系: --snapshot はもう受け付けず、台帳に何も書かない", async () => {
+  const s = await setup();
+  populate(s);
+  const r = s.ledger(["--run", s.plan.run, "--snapshot"]);
+  assert.notEqual(r.status, 0);
+  assert.equal(existsSync(s.runDir()), false);
+});
+
+test("異常系: 台帳の場所が中身のある git 管理外のディレクトリなら、何も書かずにエラーにする", async () => {
   const s = await setup();
   populate(s);
   const other = join(s.tmp, "notes");
   mkdirSync(other);
   writeFileSync(join(other, "memo.txt"), "手元のメモ\n");
-  const otherEnv = { ...s.env, TASQUE_LEDGER_DIR: other };
 
-  for (const r of [s.ledger(["--run", s.plan.run], otherEnv), s.snapshot(otherEnv)]) {
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /git リポジトリのルートでない/);
-  }
+  const r = s.ledger(["--run", s.plan.run], { ...s.env, TASQUE_LEDGER_DIR: other });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /git リポジトリのルートでない/);
   assert.equal(existsSync(join(other, ".git")), false);
   assert.equal(existsSync(join(other, s.project)), false);
 });

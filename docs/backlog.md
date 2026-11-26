@@ -19,7 +19,6 @@
 
 ### 未検証
 
-- PR がマージ済みのワークツリーを `/tasque-loop:clean` で片付ける流れ。gh と remote のある環境で試す（ユニットテストでは PR の状態を差し替えて確かめている）
 - POSIX でのプロセスグループごとの kill（`lib/command.mjs`）。この Windows 環境では動かしていない
 - サンドボックスを有効にした環境（macOS・Linux・WSL2）での通し実行
 - 記録用のスクリプトを組み込んだ後のスキル（`/tasque-loop:run`）の通し実行。組み込みは手で書いた
