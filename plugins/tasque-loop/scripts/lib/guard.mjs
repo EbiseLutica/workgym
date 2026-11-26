@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isAllowed, matchesAny, testOwner } from "./contract.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
 import { PLANNER } from "./plan-check.mjs";
@@ -147,6 +147,11 @@ function writeTarget(input, projectDir, base) {
   const raw = input.tool_input?.file_path;
   if (typeof raw !== "string" || raw === "") return { error: `${tool} の対象パスが読めない` };
 
+  // POSIX ではバックスラッシュは区切りではなくファイル名の一部になり、照合したパスと実際に書くファイルがずれる
+  if (process.platform !== "win32" && raw.includes("\\")) {
+    return { error: `${raw} はバックスラッシュを含む。区切りは / を使い、ファイル名にもバックスラッシュを使わない` };
+  }
+
   // realpath は代替データストリームや末尾のドットを黙って落とすことがあるため、正規化の前の入力も確かめる
   const suspicious = suspiciousComponent(rawComponents(raw), { shortName: false });
   if (suspicious) return { error: aliasError(raw, suspicious) };
@@ -233,8 +238,8 @@ function outsidePaths(input, projectDir, pluginRoot, base) {
  */
 export function toProjectRelative(projectDir, p, base = projectDir) {
   const rel = relative(canonicalize(resolve(projectDir)), canonicalize(absolutize(p, base)));
-  if (rel === "" || isAbsolute(rel) || rel.split(/[\\/]/)[0] === "..") return null;
-  return rel.replaceAll("\\", "/");
+  if (rel === "" || isAbsolute(rel) || rel.split(sep)[0] === "..") return null;
+  return sep === "\\" ? rel.replaceAll("\\", "/") : rel;
 }
 
 function isInside(root, p, { allowRoot = false, base = root } = {}) {

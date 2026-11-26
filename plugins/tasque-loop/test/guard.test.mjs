@@ -68,10 +68,17 @@ test("スクラッチパッドは読み書き、プラグインのディレク�
   assert.ok(denied(run(write(join(pluginRoot, "skills", "x.md"), main))));
 });
 
-test("許可リスト内の書き込みは通す（絶対パス・バックスラッシュ・相対パス）", () => {
+test("許可リスト内の書き込みは通す（絶対パス・相対パス）", () => {
   assert.equal(run(write(join(projectDir, "src", "config", "load.ts"))), null);
-  assert.equal(run(write(`${projectDir}\\src\\index.ts`.replaceAll("/", "\\"))), null);
   assert.equal(run(write("src/config/load.ts")), null);
+});
+
+test("バックスラッシュは Windows では区切りとして通し、POSIX ではファイル名の一部になるので拒否する", () => {
+  const backslash = [`${projectDir}\\src\\index.ts`.replaceAll("/", "\\"), "src\\index.ts"];
+  for (const p of backslash) {
+    if (process.platform === "win32") assert.equal(run(write(p)), null, p);
+    else assert.match(run(write(p))?.hookSpecificOutput?.permissionDecisionReason ?? "", /バックスラッシュ/, p);
+  }
 });
 
 test("許可リスト外・deny・プロジェクト外は拒否する", () => {
