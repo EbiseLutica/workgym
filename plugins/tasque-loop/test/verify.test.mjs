@@ -369,11 +369,11 @@ test("post: Windows で扱えない名前のファイルができたら portable
   const { dir, put } = await setup({ tasks: [task("T1", { max_diff: { lines: 10, files: 5 } })] });
   await verifyPre(dir, RUN, "T1");
   put("src/impl.txt", "ok\n");
-  put("src/a\b.txt", "x\n");
+  put("src/a\\b.txt", "x\n");
   put("src/con.txt", "x\n");
   const post = await verifyPost(dir, RUN, "T1");
   assert.deepEqual(failed(post), ["portable_names"]);
-  assert.match(post.checks.find((c) => c.name === "portable_names").detail, /a\b\.txt.*con\.txt/s);
+  assert.match(post.checks.find((c) => c.name === "portable_names").detail, /a\\b\.txt.*con\.txt/s);
 });
 
 test("post: 普通の名前なら portable_names は通る", async () => {
