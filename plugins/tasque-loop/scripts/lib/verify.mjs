@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runCommand } from "./command.mjs";
 import { CONFIG_FILE, loadConfig, testCommand } from "./config.mjs";
-import { isAllowed, isTestPath, matchesAny, samePath, validatePlan } from "./contract.mjs";
+import { isAllowed, isTestPath, matchesAny, portablePathError, samePath, validatePlan } from "./contract.mjs";
 import { currentBranch, git, headCommit, isIgnored, isOutsideProject, repoLayout } from "./git.mjs";
 import { draftDigest, draftPaths } from "./plan-check.mjs";
 import { baselinePath, loadApproval, runPaths, sha256Of, taskFile } from "./run.mjs";
@@ -162,6 +162,8 @@ export async function verifyPost(projectDir, run, taskId) {
   const touched = changed.filter((f) => isTestPath(f, plan));
   checks.push(check("tests_unchanged", touched.length === 0, (touched.length ? `変更された: ${touched.join(", ")}` : "") + note));
 
+  checks.push(portableNamesCheck(projectDir, changed));
+
   const size = diffSize(projectDir, layout, base, changed, config.diff_exclude);
   checks.push(
     check(
@@ -221,6 +223,7 @@ export async function verifyPr(projectDir, run) {
     (f) => isOutsideProject(f) || !plan.tasks.some((t) => isAllowed(f, t) || isTestPath(f, [t])),
   );
   checks.push(check("scope", orphan.length === 0, orphan.length ? `どのタスクにも属さない: ${orphan.join(", ")}` : ""));
+  checks.push(portableNamesCheck(projectDir, changed));
 
   const tampered = testsTampered(projectDir, plan, approval);
   checks.push(check("tests_intact", tampered.length === 0, tampered.length ? `承認時と違う: ${tampered.join(", ")}` : ""));
@@ -357,6 +360,18 @@ function isTracked(projectDir, file, dirty) {
 
 function sameList(a, b) {
   return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * 変更で増えた（または残っている）ファイルの名前が、どの OS でも扱えるかを確かめる。消したファイルは問わない。
+ * ガードを通らずに書かれたファイル（受け入れコマンドの生成物など）もここで止める。
+ */
+function portableNamesCheck(projectDir, changed) {
+  const bad = changed
+    .filter((f) => !isOutsideProject(f) && existsSync(join(projectDir, f)))
+    .map((f) => [f, portablePathError(f)])
+    .filter(([, error]) => error !== null);
+  return check("portable_names", bad.length === 0, bad.map(([f, e]) => `${f}: ${e}`).join(", "));
 }
 
 function check(name, ok, detail = "", command = undefined) {

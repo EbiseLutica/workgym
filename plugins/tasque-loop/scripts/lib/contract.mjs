@@ -74,6 +74,24 @@ export function canonicalPathError(p, { glob = true } = {}) {
   return null;
 }
 
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
+/**
+ * プロジェクト相対パスが、どの OS でも同じファイルとして扱える名前かを確かめる。問題がなければ null。
+ * POSIX で作れても Windows で扱えない名前（git に載せると Windows で壊れる）を止める。
+ * - Windows で使えない文字（\ : * ? " < > | と制御文字）
+ * - 末尾のドットや空白
+ * - Windows の予約名（CON、NUL、COM1 など。拡張子つきも含む）
+ */
+export function portablePathError(p) {
+  for (const part of p.split("/")) {
+    if (/[\\:*?"<>|\x00-\x1f]/.test(part)) return `「${part}」に Windows で使えない文字がある`;
+    if (/[.\s]$/.test(part) && part !== "." && part !== "..") return `「${part}」がドットか空白で終わる`;
+    if (WINDOWS_RESERVED.test(part)) return `「${part}」は Windows の予約名`;
+  }
+  return null;
+}
+
 /**
  * ラン単位の契約（plan）を検証し、エラーメッセージの配列を返す。空配列なら妥当。
  */

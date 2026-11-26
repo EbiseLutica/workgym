@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isAllowed, isTestPath, samePath, validatePlan } from "../scripts/lib/contract.mjs";
+import { isAllowed, isTestPath, portablePathError, samePath, validatePlan } from "../scripts/lib/contract.mjs";
 
 const example = () =>
   JSON.parse(readFileSync(new URL("../examples/plan.example.json", import.meta.url), "utf8"));
@@ -138,4 +138,13 @@ test("samePath・isTestPath は大文字小文字と Unicode 正規化の違い�
   const plan = example();
   assert.equal(isTestPath("TEST/CLI.test.ts", plan), true);
   assert.equal(isTestPath("test/cli.test.ts", plan.tasks.slice(0, 1)), false);
+});
+
+test("portablePathError は Windows で扱えない名前を指摘し、普通の名前は通す", () => {
+  for (const p of ["src/index.ts", "docs/a.b.md", ".gitignore", "src/console.ts", "src/con-fig.ts"]) {
+    assert.equal(portablePathError(p), null, p);
+  }
+  for (const p of ["src/a\b.ts", "src/a:b.ts", "src/a?.ts", "src/a|b", "src/a\tb", "src/x.", "src/x ", "con", "src/NUL.txt", "lpt1/x", "com9.log"]) {
+    assert.notEqual(portablePathError(p), null, p);
+  }
 });
