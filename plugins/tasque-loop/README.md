@@ -22,13 +22,13 @@
 
 ## 記録
 
-ランの実行中に、次のスクリプトが `.tasque/runs/<run>/` に記録を残します。最後に `ledger.mjs` がそれらを1件にまとめて、ローカル台帳（`TASQUE_LEDGER_DIR`、なければ `~/.tasque/ledger`。remote のない独立した git リポジトリ）にコミットします。
+ランの実行中に、次のスクリプトが `.tasque/runs/<run>/` に記録を残します。最後に `ledger.mjs` がそれらをローカル台帳（`TASQUE_LEDGER_DIR`、なければ `~/.tasque/ledger`。remote のない独立した git リポジトリ）にコミットします。台帳では1ランが1ディレクトリになり、`raw/`（`.tasque/runs/<run>/` の写し）と `record.json`（集計）が入ります。run スキルは区切りのたびに `ledger.mjs --run <run> --snapshot` で `raw/` を今の内容に更新します。
 
 - `review-feedback.mjs --verdict changes_requested|approved --text-file <パス>`: 契約の下書きへの人間のレビュー（原文）
 - `escalate.mjs` / `answer.mjs --answer-file <パス>`: implementer のエスカレーションと人間の回答
 - `record-review.mjs --run <run> --task <id> --round <1|2> --findings-file <パス>`: reviewer の指摘とその扱い
 - `verify --phase post`: post の試行履歴（`tasks/<id>.post-history.json`）
-- `ledger.mjs --run <run>`: 台帳への記録
+- `ledger.mjs --run <run>`: 台帳へのランの記録（`raw/` と `record.json`）。`--snapshot` を付けると `raw/` だけを今の内容に更新し、中身が変わっていればコミットする。`record.json` がコミット済みなら exit 1
 
 人間や LLM の文章は、シェルで展開されないようにファイルで渡します。
 
