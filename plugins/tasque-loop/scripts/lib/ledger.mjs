@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { git } from "./git.mjs";
@@ -74,34 +74,48 @@ export function buildRecord(projectDir, run, { now = new Date() } = {}) {
 }
 
 /**
- * 記録を台帳の <project>/<run>.json に書き、そのファイルだけを台帳のリポジトリにコミットする。
- * 台帳がない、または空のディレクトリなら git init する。中身のあるディレクトリが git リポジトリのルートでなければ例外（既存のディレクトリを勝手に git 管理にしない）。
- * 同じファイルがすでにあれば何も書かずに例外。コミットに失敗したら、書いたファイルを消してから例外にする。
+ * ランを台帳の <project>/<run>/ に書き、そのランのパスだけを台帳のリポジトリにコミットする。承認済みのランでなければ例外。
+ * withRecord なら buildRecord の集計を record.json に書く（ランの終わり）。raw/ は .tasque/runs/<run>/ の今の内容に置き換える（コピー元で消えたファイルも消す）。
+ * 台帳の record.json がコミット済みなら、何も書かずに例外。台帳がない、または空のディレクトリなら git init する。
+ * 中身のあるディレクトリが git リポジトリのルートでなければ例外（既存のディレクトリを勝手に git 管理にしない）。
+ * 変化がなければコミットせず committed: false を返す。コミットに失敗したら書いたファイルは残したまま例外にする。原因を確かめてから同じ呼び方でやり直す。
  * 名前とメールは台帳のリポジトリの設定を使い、なければ tasque-loop / tasque-loop@localhost にする。
  */
-export function commitRecord(dir, record) {
-  const rel = `${record.project}/${record.run}.json`;
-  const file = join(dir, rel);
+export function writeRun(dir, projectDir, run, { withRecord = false, now = new Date() } = {}) {
+  loadApproval(projectDir, run);
+  const summary = withRecord ? buildRecord(projectDir, run, { now }) : null;
+  const project = projectName(projectDir);
+  const rel = `${project}/${run}`;
   const fresh = !existsSync(dir) || readdirSync(dir).length === 0;
   if (!fresh) assertLedgerRoot(dir);
-  if (existsSync(file)) throw new Error(`台帳に ${rel} がすでにある`);
 
   if (fresh) {
     mkdirSync(dir, { recursive: true });
     git(dir, ["init", "-q"]);
   }
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(record, null, 2) + "\n", { flag: "wx" });
+  if (committed(dir, `${rel}/record.json`)) throw new Error(`台帳に ${rel}/record.json がすでにある（コミット済み）`);
+
+  const runDir = join(dir, rel);
+  mkdirSync(runDir, { recursive: true });
+  rmSync(join(runDir, "raw"), { recursive: true, force: true });
+  cpSync(runPaths(projectDir, run).dir, join(runDir, "raw"), { recursive: true });
+  if (summary) writeFileSync(join(runDir, "record.json"), JSON.stringify(summary, null, 2) + "\n");
 
   try {
-    git(dir, ["add", "--", rel]);
-    git(dir, [...identityOptions(dir), "commit", "-q", "-m", `record ${record.project} ${record.run}`, "--", rel]);
+    git(dir, ["add", "-A", "--", rel]);
+    if (git(dir, ["status", "--porcelain", "--", rel]).trim() === "") return { dir: runDir, committed: false };
+    git(dir, [...identityOptions(dir), "commit", "-q", "-m", `${summary ? "record" : "snapshot"} ${project} ${run}`, "--", rel]);
   } catch (e) {
-    spawnSync("git", ["rm", "--cached", "-q", "--", rel], { cwd: dir });
-    rmSync(file, { force: true });
-    throw new Error(`台帳のコミットに失敗した。書いた ${rel} は消した: ${e.message}`);
+    throw new Error(`台帳のコミットに失敗した。書いたファイルは残してある。原因を確かめてから、同じコマンドをやり直すこと: ${e.message}`);
   }
-  return file;
+  return { dir: runDir, committed: true };
+}
+
+/**
+ * パス（台帳のリポジトリの / 区切り）が HEAD にコミットされているか。ステージしただけのものは数えない。
+ */
+function committed(dir, rel) {
+  return spawnSync("git", ["cat-file", "-e", `HEAD:${rel}`], { cwd: dir }).status === 0;
 }
 
 function assertLedgerRoot(dir) {
