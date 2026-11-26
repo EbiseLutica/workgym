@@ -2,8 +2,9 @@
   "extraKnownMarketplaces": {
     "workgym": {
       "source": {
-        "source": "directory",
-        "path": "./"
+        "source": "github",
+        "repo": "ebiselutica/workgym",
+        "ref": "tasque-stable"
       }
     }
   },

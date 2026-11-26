@@ -3,7 +3,8 @@
 機能要件をタスク契約に分割し、契約ごとに受け入れテストを先に書かせてから実装させるための Claude Code プラグインです。契約・許可リストのフック・検査スクリプト（verify）で、implementer が契約の外を書き換えたりテストを書き換えたりしていないことを機械的に確かめます。
 
 ```
-/plugin install tasque-loop --marketplace ebiselutica/workgym
+/plugin marketplace add ebiselutica/workgym#tasque-stable
+/plugin install tasque-loop@workgym
 ```
 
 `/tasque-loop:run <要件>` で、下の流れをメインエージェントが進行します（要件は GitHub issue の URL・番号、本文テキスト、仕様ファイルのパス）。仕様は [docs/tasque-loop.md](../../docs/tasque-loop.md) にあります。

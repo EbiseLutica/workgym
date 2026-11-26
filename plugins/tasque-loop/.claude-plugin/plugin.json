@@ -1,6 +1,5 @@
 {
   "name": "tasque-loop",
-  "version": "0.0.1",
   "description": "タスク契約・許可リストフック・verify・レビュー上限つきの実装ループ",
   "author": { "name": "Ebise Lutica" },
   "license": "MIT"

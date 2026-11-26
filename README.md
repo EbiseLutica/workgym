@@ -19,8 +19,11 @@ LLM に実装を任せつつ、最終レビューは人間が持つための Cla
 Claude Code で次を実行します。
 
 ```
-/plugin install tasque-loop --marketplace ebiselutica/workgym
+/plugin marketplace add ebiselutica/workgym#tasque-stable
+/plugin install tasque-loop@workgym
 ```
+
+配布するのは `tasque-stable` ブランチの版です。`main` に入った変更は、`tasque-stable` を進めるまで使う側に届きません。更新は `claude plugin update tasque-loop@workgym` のあと `/reload-plugins` で反映します。`plugin.json` には `version` を書かず、コミットごとに別の版として扱わせています。
 
 入れたら、対象のリポジトリで `/tasque-loop:run <要件>` を実行します。使い方の詳細は [plugins/tasque-loop/README.md](plugins/tasque-loop/README.md) を参照してください。
 
