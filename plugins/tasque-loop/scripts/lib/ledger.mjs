@@ -39,6 +39,7 @@ export function buildRecord(projectDir, run, { now = new Date() } = {}) {
       .filter((r) => r !== null)
       .map((r) => r.findings);
     const all = rounds.flat();
+    const round1 = readOptional(taskFile(projectDir, run, task.id, ".review-1.json"))?.findings ?? [];
     return {
       id: task.id,
       title: task.title,
@@ -49,6 +50,7 @@ export function buildRecord(projectDir, run, { now = new Date() } = {}) {
         by_severity: countBy(all, "severity", SEVERITIES),
         by_disposition: countBy(all, "disposition", DISPOSITIONS),
         late: rounds[1]?.length ?? 0,
+        found_by: countFoundBy(round1),
       },
     };
   });
@@ -119,6 +121,21 @@ function identityOptions(dir) {
 function configValue(dir, key) {
   const r = spawnSync("git", ["config", key], { cwd: dir, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "";
+}
+
+/**
+ * 1ラウンド目の指摘を出どころ（並列と1体）で分けて数え、それぞれの却下の数も返す。found_by のない古い指摘はどれにも数えない。
+ */
+function countFoundBy(findings) {
+  const tally = (hit) => ({ count: hit.length, rejected: hit.filter((f) => f.disposition === "rejected").length });
+  const dated = findings.filter((f) => Array.isArray(f.found_by));
+  const single = (f) => f.found_by.includes("1体");
+  const parallel = (f) => f.found_by.some((v) => v.startsWith("並列:"));
+  return {
+    both: tally(dated.filter((f) => single(f) && parallel(f))),
+    parallel_only: tally(dated.filter((f) => parallel(f) && !single(f))),
+    single_only: tally(dated.filter((f) => single(f) && !parallel(f))),
+  };
 }
 
 function countBy(items, key, keys) {
