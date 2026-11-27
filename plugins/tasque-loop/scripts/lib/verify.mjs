@@ -149,8 +149,10 @@ export async function verifyPre(projectDir, run, taskId) {
 
   const result = { ...finish(run, taskId, "pre", checks), warnings };
   if (result.ok) {
-    writeState(projectDir, run, taskId, { base: headCommit(projectDir) });
+    // git rm が失敗したときに基点だけが残って pre をやり直せなくならないよう、消してから基点を記録する
+    const base = headCommit(projectDir);
     if (deletes.length > 0) git(projectDir, ["--literal-pathspecs", "rm", "-q", "--", ...deletes]);
+    writeState(projectDir, run, taskId, { base });
     result.deleted = deletes;
   }
   return save(projectDir, run, `${taskId}.pre`, result);
@@ -188,7 +190,7 @@ export async function verifyPost(projectDir, run, taskId) {
 
   // git rm の後に作り直したファイルは、未追跡のまま差分上は削除に見えるので、ディスク上の有無も見る
   const remaining = (task.delete ?? []).filter(
-    (p) => !declared.some((f) => samePath(f, p)) || existsSync(join(projectDir, p)),
+    (p) => !declared.includes(p) || existsSync(join(projectDir, p)),
   );
   checks.push(check("delete_done", remaining.length === 0, remaining.length ? `消えていない: ${remaining.join(", ")}` : ""));
 

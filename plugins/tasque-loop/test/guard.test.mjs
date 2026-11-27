@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELETE_TOOL } from "../scripts/lib/discard.mjs";
-import { decide, defaultIsIgnored, IMPLEMENTER, toProjectRelative } from "../scripts/lib/guard.mjs";
+import { decide, decideHook, defaultIsIgnored, IMPLEMENTER, toProjectRelative } from "../scripts/lib/guard.mjs";
 import { approvePlan } from "../scripts/lib/run.mjs";
 import { approvableProject, decidedPlan } from "./helpers.mjs";
 
@@ -305,4 +305,12 @@ test("削除ツール: planner と implementer 以外は、実行中でなくて
   for (const agent_type of [undefined, "Explore", "tasque-loop:reviewer"]) {
     assert.ok(denied(run(del(join(projectDir, "src", "config", "load.ts"), { agent_type }), { active: false })), agent_type);
   }
+});
+
+test("削除ツール: プロジェクトディレクトリを決められなければ、誰が呼んでも拒否する", () => {
+  const fail = () => {
+    throw new Error("git がない");
+  };
+  const input = del(join(projectDir, "src", "config", "load.ts"), { agent_type: undefined, cwd: projectDir });
+  assert.ok(denied(decideHook(input, { envProjectDir: projectDir, resolveDir: fail })));
 });

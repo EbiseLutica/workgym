@@ -45,6 +45,21 @@ export function isTrackedAs(cwd, rel) {
 }
 
 /**
+ * dir 直下のファイル name が、大文字小文字と Unicode の正規化の違いを無視してインデックスに載っているか。
+ * 拒否する側に倒して照合する（大文字小文字を区別しないファイルシステムでは、別の書き方でも同じファイルを指すため）。
+ * git のエラー（リポジトリの外など）は例外。
+ */
+export function isTrackedLoosely(dir, name) {
+  const r = spawnSync("git", ["ls-files", "-z"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 30 });
+  if (r.error || r.status !== 0) {
+    throw new Error(r.error?.message ?? (r.stderr.trim() || `git ls-files が ${r.status} で終了した`));
+  }
+  const fold = (s) => s.normalize("NFC").toLowerCase();
+  const target = fold(name);
+  return r.stdout.split("\0").some((f) => f !== "" && !f.includes("/") && fold(f) === target);
+}
+
+/**
  * プロジェクト（tasque.config.json と .tasque のあるディレクトリ）とリポジトリの位置関係。
  * git の出力はリポジトリルートからのパスで受け取り、ここでプロジェクトからの相対パスに直す。
  * - top: リポジトリのルート（git コマンドはここで実行する）

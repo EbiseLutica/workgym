@@ -109,14 +109,23 @@ export function isProtectedPath(lowerRel) {
   return parts.some((c) => PROTECTED_DIRS.includes(c)) || PROTECTED_FILES.includes(parts.at(-1));
 }
 
+/** tasque の制御ファイルと設定（小文字の glob）。planner も implementer も書き換えられず、契約の delete にも書けない。 */
+export const CONTROL_PATHS = [".tasque/**", "tasque.config.json"];
+
+/**
+ * どの階層にあっても implementer に書かせず、契約の delete にも書けないファイル名（小文字）。
+ * .gitignore は書いた後のファイルを検査から隠せるため。
+ */
+export const HIDING_FILES = [".gitignore"];
+
 /**
  * 契約の delete に書けないパス（保護パス、tasque の制御ファイルと設定、.gitignore）なら理由を返す。書けるなら null。
  */
 function deletePathError(p) {
   const lower = p.toLowerCase();
   if (isProtectedPath(lower)) return ".git・.claude の中や CLAUDE.md は消せない";
-  if (lower.split("/")[0] === ".tasque" || lower === "tasque.config.json") return "tasque の制御ファイルと設定は消せない";
-  if (lower.split("/").at(-1) === ".gitignore") return ".gitignore は消せない";
+  if (matchesAny(lower, CONTROL_PATHS)) return "tasque の制御ファイルと設定は消せない";
+  if (HIDING_FILES.includes(lower.split("/").at(-1))) return ".gitignore は消せない";
   return null;
 }
 
@@ -225,10 +234,11 @@ export function validatePlan(plan, { stage = "draft" } = {}) {
 }
 
 /**
- * 削除するファイルのリスト（delete）を、そのタスクに挙がっているかで判定する。
+ * パスがタスクの delete に挙がっているか。delete は追跡済みの名前そのままであることを検査済みなので、完全一致で照合する
+ * （大文字小文字を区別するファイルシステムで、宣言のない別のファイルの削除を宣言どおりと取り違えないため）。
  */
 export function isDeclaredDelete(path, task) {
-  return (task.delete ?? []).some((p) => samePath(p, path));
+  return (task.delete ?? []).includes(path);
 }
 
 /**

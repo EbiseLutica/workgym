@@ -35,6 +35,35 @@ test("相対パス・存在しないパス・ディレクトリは消さない",
   assert.ok(existsSync(join(dir, "src", "a.js")));
 });
 
+test("大文字小文字を変えた名前でも追跡済みのファイルは消さない", () => {
+  const { dir, put, git } = makeRepo();
+  put("src/Foo.ts", "x\n");
+  git("add", "src/Foo.ts");
+  git("commit", "-q", "-m", "foo");
+  // 大文字小文字を区別するファイルシステムでは FOO.TS は別のファイルなので、作ってから確かめる
+  if (!existsSync(join(dir, "src", "FOO.TS"))) put("src/FOO.TS", "y\n");
+  assert.throws(() => discardFile(join(dir, "src", "FOO.TS")), /git の管理下/);
+  assert.ok(existsSync(join(dir, "src", "Foo.ts")));
+});
+
+test("短い名前（8.3 形式）でも追跡済みのファイルは消さない", { skip: process.platform !== "win32" }, (t) => {
+  const { dir, put, git } = makeRepo();
+  put("src/LongFileName.ts", "x\n");
+  git("add", "src/LongFileName.ts");
+  git("commit", "-q", "-m", "long");
+  const short = join(dir, "src", "LONGFI~1.TS");
+  if (!existsSync(short)) return t.skip("このボリュームでは短い名前が作られない");
+  assert.throws(() => discardFile(short), /git の管理下/);
+  assert.ok(existsSync(join(dir, "src", "LongFileName.ts")));
+});
+
+test("worktree の .git ファイルは未追跡でも消さない", () => {
+  const { dir, put } = makeRepo();
+  put("sub/.git", "gitdir: elsewhere\n");
+  assert.throws(() => discardFile(join(dir, "sub", ".git")), /git の管理用/);
+  assert.ok(existsSync(join(dir, "sub", ".git")));
+});
+
 /**
  * MCP サーバーを起動し、リクエストを1件ずつ送って応答を受け取る。
  */
@@ -55,7 +84,8 @@ function startServer() {
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   const notify = (method) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n");
-  return { request, notify, close: () => child.kill() };
+  const raw = (line) => child.stdin.write(line + "\n");
+  return { request, notify, raw, close: () => child.kill() };
 }
 
 test("MCP サーバー: 初期化・ツール一覧・削除の呼び出しに応答する", async () => {
@@ -81,6 +111,21 @@ test("MCP サーバー: 初期化・ツール一覧・削除の呼び出しに�
 
     const unknown = await server.request("server/discover", {});
     assert.equal(unknown.error.code, -32601);
+  } finally {
+    server.close();
+  }
+});
+
+test("MCP サーバー: 未対応の版には自分の版を返し、異常な入力や引数でも落ちない", async () => {
+  const server = startServer();
+  try {
+    const init = await server.request("initialize", { protocolVersion: "1999-01-01", capabilities: {} });
+    assert.equal(init.result.protocolVersion, "2025-11-25");
+    for (const line of ["null", "42", '"x"', "{ broken"]) server.raw(line);
+    const noArgs = await server.request("tools/call", { name: "delete_file" });
+    assert.equal(noArgs.result.isError, true);
+    assert.match(noArgs.result.content[0].text, /絶対パス/);
+    assert.ok((await server.request("ping", {})).result);
   } finally {
     server.close();
   }

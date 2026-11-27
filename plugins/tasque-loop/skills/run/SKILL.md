@@ -173,7 +173,7 @@ implementer が `停止` を報告したとき（契約では決められない�
 
 ### 4-6. コミット
 
-post の結果の `diff.changed` に挙がったパスだけを明示して `git add` し、タスク1つを1コミットにする。メッセージは `<種別>: <title>`（例: `feat: 設定ファイルの読み込みを追加`）、本文に `tasque <run> <id>` を書く。
+post の結果の `diff.changed` に挙がったパスから `diff.deleted` のパスを除いたものだけを明示して `git add` し、タスク1つを1コミットにする。`diff.deleted` のファイルは pre の `git rm` でステージ済みで、`git add` に渡すと pathspec が一致せずに失敗する。メッセージは `<種別>: <title>`（例: `feat: 設定ファイルの読み込みを追加`）、本文に `tasque <run> <id>` を書く。
 
 コミットしたら、冒頭の原則に従って台帳に記録する。
 

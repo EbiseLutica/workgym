@@ -2,9 +2,10 @@
 // 1行1メッセージの JSON-RPC 2.0 を読み書きする。消してよいパスかの判定は PreToolUse のガード（guard.mjs）が行い、
 // ここでは未追跡のファイルしか消さないことだけを確かめる（lib/discard.mjs）。
 import { createInterface } from "node:readline";
-import { DiscardError, discardFile } from "./lib/discard.mjs";
+import { discardFile } from "./lib/discard.mjs";
 
-const PROTOCOL_VERSION = "2025-06-18";
+/** 対応するプロトコルの版。新しい順。クライアントの版が一覧になければ先頭を返す。 */
+const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const TOOLS = [
   {
@@ -32,7 +33,9 @@ function handle(method, params) {
     case "initialize":
       return {
         result: {
-          protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION,
+          protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion)
+            ? params.protocolVersion
+            : PROTOCOL_VERSIONS[0],
           capabilities: { tools: {} },
           serverInfo: { name: "tasque-loop-fs", version: "1.0.0" },
         },
@@ -48,13 +51,15 @@ function handle(method, params) {
   }
 }
 
+/**
+ * ツールの実行。失敗はプロトコルのエラーではなく、理由つきの isError の結果として返す。
+ */
 function callTool(name, args) {
   if (name !== "delete_file") return text(`未知のツール: ${name}`, true);
   try {
-    return text(discardFile(args.file_path));
+    return text(discardFile(args?.file_path));
   } catch (e) {
-    if (e instanceof DiscardError) return text(e.message, true);
-    throw e;
+    return text(e.message, true);
   }
 }
 
@@ -66,7 +71,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   } catch {
     return send({ id: null, error: { code: -32700, message: "JSON として読めない" } });
   }
-  if (req.id === undefined || req.id === null) return;
+  if (typeof req !== "object" || req === null || req.id === undefined || req.id === null) return;
   try {
     send({ id: req.id, ...handle(req.method, req.params) });
   } catch (e) {

@@ -19,7 +19,7 @@ tools: Read, Glob, Grep, Write, Edit, mcp__plugin_tasque-loop_fs__delete_file
   - `allow`: implementer が書き換えてよいパスの glob（プロジェクトルートからの相対、区切りは `/`）
   - `deny`（任意）: `allow` の中で除外したいパスの glob
   - `out_of_scope`: やらないことを文章で書いた文字列の配列
-  - `delete`（任意）: このタスクで消す既存の（git 管理下の）ファイル。glob は使わず、git に載っている名前のまま1ファイルずつ書く。実装の前にメインエージェントが消すので、置き換え先を作るタスクより後のタスクに書く。受け入れテストや `.tasque/`・`.git`・`.claude`・`CLAUDE.md`・`tasque.config.json`・`.gitignore` は書けない。`delete` どおりの削除は `max_diff` に数えない
+  - `delete`（任意）: このタスクで消す既存の（git 管理下の）ファイル。glob は使わず、git に載っている名前のまま1ファイルずつ書く。実装の前にメインエージェントが消すので、置き換え先を作るタスクより後のタスクに書く。受け入れテストや `.tasque/`・`.git`・`.claude`・`CLAUDE.md`・`tasque.config.json`・`.gitignore` は書けない。`delete` どおりの削除は `max_diff` に数えない。`delete` のファイルは `allow` に含めなくてよい。削除だけのタスクでも `allow` は空にできないので、消したファイルへの参照を直せる範囲を書く
   - `tests`: このタスクの受け入れテストのファイル（glob は使わず1ファイルずつ書く）。どのタスクの `allow` にも一致してはいけず、同じファイルを2つのタスクに挙げてもいけない
   - `acceptance`: `{ "cmd": 実行コマンド, "why": 何を確かめるか, "cwd": 作業ディレクトリ（任意） }` の配列。`cwd` はプロジェクトルートからの相対で、省略時はプロジェクトルート
   - `max_diff`: `{ "lines": 追加＋削除行の上限, "files": ファイル数の上限 }`

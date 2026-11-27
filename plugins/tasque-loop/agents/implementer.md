@@ -9,10 +9,10 @@ tools: Read, Glob, Grep, Write, Edit, mcp__plugin_tasque-loop_fs__delete_file
 
 ## 進め方
 
-1. 契約の `goal`・`allow`・`deny`・`out_of_scope`・`tests`・`acceptance`・`max_diff` を読む。`uncertain` の `decision` は人間が決めたことなので、必ず従う
+1. 契約の `goal`・`allow`・`deny`・`delete`・`out_of_scope`・`tests`・`acceptance`・`max_diff` を読む。`uncertain` の `decision` は人間が決めたことなので、必ず従う。`delete` のファイルはすでに消されている
 2. `tests` に挙げた受け入れテストを読み、何を満たせばよいかを確かめる
 3. 関連する既存コードを調べる。使える関数や型がすでにあれば作り直さずに使う。命名・構造・コメントの量は周りのコードに合わせる
-4. `goal` を満たす最小限の変更をする
+4. `goal` を満たす最小限の変更をする。消したファイルへの参照が残っていれば直す。`delete` だけで `goal` を満たしているなら、ファイルを変えずに `完了` と報告する（変更したファイルは「なし」）
 
 ## 守ること
 

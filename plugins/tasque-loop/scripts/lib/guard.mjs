@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { isAllowed, isProtectedPath as isProtected, matchesAny, testOwner } from "./contract.mjs";
+import { CONTROL_PATHS, HIDING_FILES, isAllowed, isProtectedPath, matchesAny, testOwner } from "./contract.mjs";
 import { DELETE_TOOL, isFullyAbsolute } from "./discard.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
 import { PLANNER } from "./plan-check.mjs";
@@ -19,17 +19,10 @@ const MODIFY_TOOLS = [...WRITE_TOOLS, DELETE_TOOL];
 const REPORT_TOOLS = ["SubagentHandback"];
 
 /**
- * 契約の allow に関係なく implementer に書かせないパス。
- * 大文字小文字を区別しないファイルシステムを考え、小文字に揃えて照合する。
- * .gitignore は書いた後のファイルを検査から隠せるため、どの階層でも書かせない。
+ * 契約の allow に関係なく implementer に書かせないパスは、制御ファイル（CONTROL_PATHS）と、
+ * どの階層の .gitignore も（HIDING_FILES）。大文字小文字を区別しないファイルシステムを考え、小文字に揃えて照合する。
+ * planner も制御ファイルには書けないが、契約の下書きだけは .tasque の中でも書ける。
  */
-const ALWAYS_DENY = [".tasque/**", "tasque.config.json"];
-const IMPLEMENTER_PROTECTED_FILES = [".gitignore"];
-
-/**
- * planner に書かせないパス（小文字）。契約の下書きだけは .tasque の中でも書ける。
- */
-const PLANNER_DENY = [".tasque/**", "tasque.config.json"];
 const PLANNER_ALLOW = [".tasque/plan.draft.json"];
 
 /**
@@ -71,7 +64,7 @@ export function decide(
     const lower = target.rel.toLowerCase();
     // 下書きは書き直せるが、消すことはできない
     const draftAllowed = tool !== DELETE_TOOL && PLANNER_ALLOW.includes(lower);
-    if (isProtected(lower) || (matchesAny(lower, PLANNER_DENY) && !draftAllowed)) {
+    if (isProtectedPath(lower) || (matchesAny(lower, CONTROL_PATHS) && !draftAllowed)) {
       return deny(`${target.rel} は planner が書き換えてはいけない`);
     }
     return permit(tool, target.rel);
@@ -95,9 +88,9 @@ export function decide(
 
   const lower = rel.toLowerCase();
   if (
-    isProtected(lower) ||
-    matchesAny(lower, ALWAYS_DENY) ||
-    IMPLEMENTER_PROTECTED_FILES.includes(lower.split("/").at(-1))
+    isProtectedPath(lower) ||
+    matchesAny(lower, CONTROL_PATHS) ||
+    HIDING_FILES.includes(lower.split("/").at(-1))
   ) {
     return deny(`${rel} は implementer が書き換えてはいけない`);
   }
@@ -125,7 +118,7 @@ export function decide(
 
 /**
  * フックの入力と環境からプロジェクトディレクトリを決めて判定する（guard.mjs の本体）。
- * プロジェクトディレクトリを決められないときは、tasque-loop のエージェントか実行中なら拒否する。
+ * プロジェクトディレクトリを決められないときは、tasque-loop のエージェントか実行中か、削除ツールなら拒否する。
  */
 export function decideHook(input, { envProjectDir, pluginRoot, resolveDir = resolveProjectDir, ...rest } = {}) {
   let projectDir;
@@ -134,7 +127,7 @@ export function decideHook(input, { envProjectDir, pluginRoot, resolveDir = reso
   } catch (e) {
     const isTasqueAgent = typeof input.agent_type === "string" && input.agent_type.startsWith(AGENT_PREFIX);
     const fallback = envProjectDir ?? input.cwd;
-    if (isTasqueAgent || (fallback && defaultRunActive(fallback))) {
+    if (isTasqueAgent || input.tool_name === DELETE_TOOL || (fallback && defaultRunActive(fallback))) {
       return deny(`プロジェクトディレクトリを決められない: ${e.message}`);
     }
     return null;
