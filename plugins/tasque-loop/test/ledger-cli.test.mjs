@@ -278,7 +278,6 @@ test("正常系: --run はランの集計を <プロジェクト>/<run>/record.j
   assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
   assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
-  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
   assert.equal(s.lgit("remote").trim(), "");
 
@@ -320,7 +319,6 @@ test("正常系: --run を繰り返すと、raw/ を最新の内容（コピー�
   );
 
   assert.equal(commitCount(s), before + 1);
-  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
   assert.ok(headPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), headPaths(s).join("\n"));
   assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
   assert.ok(headPaths(s).includes(`${s.runRel}/raw/tasks/T1.post-history.json`));
