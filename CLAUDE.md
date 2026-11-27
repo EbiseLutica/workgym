@@ -22,9 +22,5 @@
 - ツールに渡されたパスの解決: `absolutize`・`canonicalize`・`toProjectRelative`・`isInside`
 - 別名になりうる書き方の検出: `rawComponents`・`suspiciousComponent`。正規化の前の入力そのものにも使う（realpath は代替データストリームや末尾のドットを黙って落とすため）
 - cwd に依存しない絶対パスか: `isFullyAbsolute`
-
-まだ `paths.mjs` に移していないもの:
-
-- `contract.mjs` の `isAllowed`。`deny` の照合が `toLowerCase()` だけで、NFC にしていない
-- `check-worktree.mjs` と `git.mjs` の、ディレクトリが同じかの判定（realpath と Windows での小文字化）。2か所に重複している
-- `contract.mjs` の `canonicalPathError`・`portablePathError`（契約に書くパスの形式検査）
+- 実在する2つのディレクトリが同じか: `isSameDir`
+- 契約や設定に書くパスの形式検査: `canonicalPathError`（正規形か）・`portablePathError`（どの OS でも扱える名前か）

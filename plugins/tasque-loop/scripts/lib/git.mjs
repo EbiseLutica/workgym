@@ -1,7 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
 import { posix } from "node:path";
-import { isSamePath } from "./paths.mjs";
+import { isSameDir, isSamePath } from "./paths.mjs";
 
 /**
  * git を実行して標準出力を返す。失敗したら例外。
@@ -93,7 +92,7 @@ export function resolveProjectDir({ cwd, envProjectDir }) {
   const here = repoInfo(cwd);
   const env = repoInfo(envProjectDir);
   if (!here || !env) return envProjectDir;
-  if (!sameDir(here.common, env.common)) return envProjectDir;
+  if (!isSameDir(here.common, env.common)) return envProjectDir;
   return env.prefix === "" ? here.top : posix.join(here.top, env.prefix.replace(/\/$/, ""));
 }
 
@@ -117,14 +116,6 @@ function repoInfo(dir) {
   if (r.status !== 0) return null;
   const [top, common, prefix = ""] = r.stdout.split(/\r?\n/);
   return { top, common, prefix };
-}
-
-function sameDir(a, b) {
-  const norm = (p) => {
-    const real = realpathSync.native(p);
-    return process.platform === "win32" ? real.toLowerCase() : real;
-  };
-  return norm(a) === norm(b);
 }
 
 /**
