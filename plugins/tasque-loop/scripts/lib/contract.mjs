@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { isSamePath, toNfcLowerPath } from "./paths.mjs";
 
 /**
  * 契約の検証段階。
@@ -34,13 +35,9 @@ export function isAllowed(path, task) {
 }
 
 /**
- * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す。
- * 大文字小文字を区別しないファイルシステムと Unicode の正規化の違いを考え、拒否側に倒して照合する。
- * テストファイルの照合はすべてこの関数を通す。
+ * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す（本体は paths.mjs）。テストファイルの照合はすべてこの関数を通す。
  */
-export function samePath(a, b) {
-  return a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase();
-}
+export { isSamePath };
 
 /**
  * パスがどれかのタスクの受け入れテストなら、そのタスクを返す。なければ undefined。
@@ -48,7 +45,7 @@ export function samePath(a, b) {
  */
 export function testOwner(path, planOrTasks) {
   const tasks = Array.isArray(planOrTasks) ? planOrTasks : planOrTasks.tasks;
-  return tasks.find((t) => (t.tests ?? []).some((x) => samePath(x, path)));
+  return tasks.find((t) => (t.tests ?? []).some((x) => isSamePath(x, path)));
 }
 
 /**
@@ -89,6 +86,43 @@ export function portablePathError(p) {
     if (/[.\s]$/.test(part) && part !== "." && part !== "..") return `「${part}」がドットか空白で終わる`;
     if (WINDOWS_RESERVED.test(part)) return `「${part}」は Windows の予約名`;
   }
+  return null;
+}
+
+/**
+ * どの階層にあっても tasque-loop のエージェントに書かせない名前（小文字）。
+ * - ディレクトリ: git の内部状態と Claude Code の設定
+ * - ファイル: 後続のエージェントに読み込まれる指示ファイル（入れ子の CLAUDE.md を含む）
+ * glob の ** はドットで始まるディレクトリをまたがないため、パスの要素ごとに照合する。
+ */
+const PROTECTED_DIRS = [".git", ".claude"];
+const PROTECTED_FILES = ["claude.md", "claude.local.md"];
+
+/**
+ * toNfcLowerPath で正規化したプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
+ */
+export function isProtectedPath(lowerRel) {
+  const parts = lowerRel.split("/");
+  return parts.some((c) => PROTECTED_DIRS.includes(c)) || PROTECTED_FILES.includes(parts.at(-1));
+}
+
+/** tasque の制御ファイルと設定（小文字の glob）。planner も implementer も書き換えられず、契約の delete にも書けない。 */
+export const CONTROL_PATHS = [".tasque/**", "tasque.config.json"];
+
+/**
+ * どの階層にあっても implementer に書かせず、契約の delete にも書けないファイル名（小文字）。
+ * .gitignore は書いた後のファイルを検査から隠せるため。
+ */
+export const HIDING_FILES = [".gitignore"];
+
+/**
+ * 契約の delete に書けないパス（保護パス、tasque の制御ファイルと設定、.gitignore）なら理由を返す。書けるなら null。
+ */
+function deletePathError(p) {
+  const lower = toNfcLowerPath(p);
+  if (isProtectedPath(lower)) return ".git・.claude の中や CLAUDE.md は消せない";
+  if (matchesAny(lower, CONTROL_PATHS)) return "tasque の制御ファイルと設定は消せない";
+  if (HIDING_FILES.includes(lower.split("/").at(-1))) return ".gitignore は消せない";
   return null;
 }
 
@@ -140,6 +174,14 @@ export function validatePlan(plan, { stage = "draft" } = {}) {
     }
     checkStringArray(task.out_of_scope, `${where}.out_of_scope`, err);
 
+    if (checkStringArray(task.delete ?? [], `${where}.delete`, err)) {
+      for (const p of task.delete ?? []) {
+        checkCanonical(p, `${where}.delete`, err, { glob: false });
+        const msg = deletePathError(p);
+        if (msg) err(`${where}.delete`, `${p}: ${msg}`);
+      }
+    }
+
     if (checkStringArray(task.tests, `${where}.tests`, err)) {
       task.tests.forEach((t) => checkCanonical(t, `${where}.tests`, err, { glob: false }));
     }
@@ -184,7 +226,35 @@ export function validatePlan(plan, { stage = "draft" } = {}) {
   });
 
   checkTestsAcrossTasks(plan.tasks, err);
+  checkDeletesAcrossTasks(plan.tasks, err);
   return errors;
+}
+
+/**
+ * パスがタスクの delete に挙がっているか。delete は追跡済みの名前そのままであることを検査済みなので、完全一致で照合する
+ * （大文字小文字を区別するファイルシステムで、宣言のない別のファイルの削除を宣言どおりと取り違えないため）。
+ */
+export function isDeclaredDelete(path, task) {
+  return (task.delete ?? []).includes(path);
+}
+
+/**
+ * ラン全体での delete の検査。
+ * - 同じファイルを2つのタスク（または同じタスク内で2回）で消さない
+ * - どのタスクの受け入れテストも消さない
+ */
+function checkDeletesAcrossTasks(tasks, err) {
+  const valid = tasks.filter((t) => isObject(t) && Array.isArray(t.delete) && t.delete.every(isNonEmptyString));
+  const listed = [];
+  for (const task of valid) {
+    for (const p of task.delete) {
+      const dup = listed.find((x) => isSamePath(x.path, p));
+      if (dup) err(`${label(task)}.delete`, `${p} は ${label(dup.task)} の delete と重複している`);
+      else listed.push({ path: p, task });
+      const owner = tasks.find((t) => isObject(t) && Array.isArray(t.tests) && t.tests.some((x) => isSamePath(x, p)));
+      if (owner) err(`${label(task)}.delete`, `${p} は ${label(owner)} の受け入れテスト`);
+    }
+  }
 }
 
 /**
@@ -199,7 +269,7 @@ function checkTestsAcrossTasks(tasks, err) {
   const listed = [];
   for (const task of valid) {
     for (const t of task.tests) {
-      const dup = listed.find((x) => samePath(x.path, t));
+      const dup = listed.find((x) => isSamePath(x.path, t));
       if (dup) err(`${label(task)}.tests`, `${t} は ${label(dup.task)} の tests と重複している`);
       else listed.push({ path: t, task });
     }

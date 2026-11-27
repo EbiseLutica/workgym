@@ -63,7 +63,7 @@ export function buildRecord(projectDir, run) {
     project: projectName(projectDir),
     run,
     tasks,
-    pr: pr?.diff ? { lines: pr.diff.lines, files: pr.diff.files } : null,
+    pr: pr?.diff ? { lines: pr.diff.lines, files: pr.diff.files, deleted: pr.diff.deleted?.length ?? 0 } : null,
     human: {
       reviews: reviews.map(({ at, verdict, text }) => ({ at, verdict, text })),
       decisions: plan.tasks.flatMap((t) => t.uncertain.map((u) => ({ task: t.id, q: u.q, decision: u.decision }))),

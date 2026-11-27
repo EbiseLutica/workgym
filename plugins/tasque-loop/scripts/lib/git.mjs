@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { posix } from "node:path";
+import { isSamePath } from "./paths.mjs";
 
 /**
  * git を実行して標準出力を返す。失敗したら例外。
@@ -31,6 +32,30 @@ export function isIgnored(cwd, rel) {
   if (r.status === 0) return true;
   if (r.status === 1) return false;
   throw new Error(r.error?.message ?? (r.stderr.trim() || `git check-ignore が ${r.status} で終了した`));
+}
+
+/**
+ * cwd からの相対パス rel が、その名前のまま（大文字小文字も含めて）インデックスに載っているか。git のエラーは例外。
+ */
+export function isTrackedAs(cwd, rel) {
+  const r = spawnSync("git", ["--literal-pathspecs", "ls-files", "-z", "--", rel], { cwd, encoding: "utf8" });
+  if (r.error || r.status !== 0) {
+    throw new Error(r.error?.message ?? (r.stderr.trim() || `git ls-files が ${r.status} で終了した`));
+  }
+  return r.stdout === `${rel}\0`;
+}
+
+/**
+ * dir 直下のファイル name が、大文字小文字と Unicode の正規化の違いを無視してインデックスに載っているか。
+ * 拒否する側に倒して照合する（大文字小文字を区別しないファイルシステムでは、別の書き方でも同じファイルを指すため）。
+ * git のエラー（リポジトリの外など）は例外。
+ */
+export function isTrackedLoosely(dir, name) {
+  const r = spawnSync("git", ["ls-files", "-z"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 30 });
+  if (r.error || r.status !== 0) {
+    throw new Error(r.error?.message ?? (r.stderr.trim() || `git ls-files が ${r.status} で終了した`));
+  }
+  return r.stdout.split("\0").some((f) => f !== "" && !f.includes("/") && isSamePath(f, name));
 }
 
 /**

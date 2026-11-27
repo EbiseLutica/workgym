@@ -383,3 +383,73 @@ test("post: 普通の名前なら portable_names は通る", async () => {
   const post = await verifyPost(dir, RUN, "T1");
   assert.equal(post.checks.find((c) => c.name === "portable_names").ok, true);
 });
+
+const OLD = "line\n".repeat(200);
+
+test("delete: pre が契約のファイルを消し、post は削除を上限に数えずに記録する", async () => {
+  const t = task("T1", { delete: ["src/old.txt"] });
+  const { dir, put } = await setup({ tasks: [t], files: { "src/old.txt": OLD } });
+  const pre = await verifyPre(dir, RUN, "T1");
+  assert.deepEqual(failed(pre), []);
+  assert.deepEqual(pre.deleted, ["src/old.txt"]);
+  assert.equal(existsSync(join(dir, "src", "old.txt")), false);
+
+  put("src/impl.txt", "ok\n");
+  const post = await verifyPost(dir, RUN, "T1");
+  assert.deepEqual(failed(post), []);
+  assert.equal(post.diff.lines, 1);
+  assert.equal(post.diff.files, 1);
+  assert.deepEqual(post.diff.deleted, ["src/old.txt"]);
+  assert.ok(post.diff.changed.includes("src/old.txt"));
+});
+
+test("delete: 追跡済みでないファイルは pre で落とし、何も消さない", async () => {
+  const t = task("T1", { delete: ["src/old.txt"] });
+  const { dir, put, git } = await setup({ tasks: [t] });
+  put("src/old.txt", OLD);
+  put(".gitignore", ".tasque/\nsrc/old.txt\n");
+  git("add", ".gitignore");
+  git("commit", "-q", "-m", "ignore");
+  assert.deepEqual(failed(await verifyPre(dir, RUN, "T1")), ["delete_tracked"]);
+  assert.ok(existsSync(join(dir, "src", "old.txt")));
+});
+
+test("delete: 宣言のない削除は allow に一致していても scope で落とす", async () => {
+  const { dir, put } = await setup({ files: { "src/old.txt": OLD } });
+  await verifyPre(dir, RUN, "T1");
+  rmSync(join(dir, "src", "old.txt"));
+  put("src/impl.txt", "ok\n");
+  const post = await verifyPost(dir, RUN, "T1");
+  assert.ok(failed(post).includes("scope"));
+  assert.deepEqual(post.diff.deleted, []);
+});
+
+test("delete: 消したファイルを作り直すと delete_done で落とす", async () => {
+  const t = task("T1", { delete: ["src/old.txt"] });
+  const { dir, put } = await setup({ tasks: [t], files: { "src/old.txt": OLD } });
+  await verifyPre(dir, RUN, "T1");
+  put("src/old.txt", OLD);
+  put("src/impl.txt", "ok\n");
+  assert.deepEqual(failed(await verifyPost(dir, RUN, "T1")), ["delete_done"]);
+});
+
+test("delete: pr は契約どおりの削除を上限に数えず、宣言のない削除を scope で落とす", async () => {
+  const t = task("T1", { delete: ["src/old.txt"] });
+  const { dir, git, put } = await setup({
+    tasks: [t],
+    config: { pr: { max_lines: 10, max_files: 3 } },
+    files: { "src/old.txt": OLD, "src/keep.txt": OLD },
+  });
+  await verifyPre(dir, RUN, "T1");
+  put("src/impl.txt", "ok\n");
+  git("add", "--", "src/impl.txt");
+  git("commit", "-q", "-m", "feat: T1");
+  const pr = await verifyPr(dir, RUN);
+  assert.deepEqual(failed(pr), []);
+  assert.deepEqual(pr.diff.deleted, ["src/old.txt"]);
+  assert.equal(pr.diff.lines, 1 + CHECK.split("\n").length - 1);
+
+  git("rm", "-q", "src/keep.txt");
+  git("commit", "-q", "-m", "宣言のない削除");
+  assert.ok(failed(await verifyPr(dir, RUN)).includes("scope"));
+});

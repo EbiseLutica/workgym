@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isAllowed, isTestPath, portablePathError, samePath, validatePlan } from "../scripts/lib/contract.mjs";
+import { isAllowed, isSamePath, isTestPath, portablePathError, validatePlan } from "../scripts/lib/contract.mjs";
 
 const example = () =>
   JSON.parse(readFileSync(new URL("../examples/plan.example.json", import.meta.url), "utf8"));
@@ -131,10 +131,10 @@ test("acceptance の cwd は任意で、正規形のプロジェクト相対パ�
   }
 });
 
-test("samePath・isTestPath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
-  assert.equal(samePath("Test/A.ts", "test/a.ts"), true);
-  assert.equal(samePath("test/が.ts", "test/か\u3099.ts"), true);
-  assert.equal(samePath("test/a.ts", "test/b.ts"), false);
+test("isSamePath・isTestPath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
+  assert.equal(isSamePath("Test/A.ts", "test/a.ts"), true);
+  assert.equal(isSamePath("test/が.ts", "test/か\u3099.ts"), true);
+  assert.equal(isSamePath("test/a.ts", "test/b.ts"), false);
   const plan = example();
   assert.equal(isTestPath("TEST/CLI.test.ts", plan), true);
   assert.equal(isTestPath("test/cli.test.ts", plan.tasks.slice(0, 1)), false);
@@ -147,4 +147,33 @@ test("portablePathError は Windows で扱えない名前を指摘し、普通�
   for (const p of ["src/a\b.ts", "src/a:b.ts", "src/a?.ts", "src/a|b", "src/a\tb", "src/x.", "src/x ", "con", "src/NUL.txt", "lpt1/x", "com9.log"]) {
     assert.notEqual(portablePathError(p), null, p);
   }
+});
+
+test("delete: 1ファイルずつ正規形で書き、保護パスと受け入れテストは消せない", () => {
+  const withDelete = (...paths) => {
+    const plan = example();
+    plan.tasks[0].delete = paths;
+    return validatePlan(plan);
+  };
+  assert.deepEqual(withDelete("src/old.ts", "docs/old.md"), []);
+  for (const [p, fragment] of [
+    ["src/*.ts", "glob"],
+    ["./src/old.ts", ". は使えない"],
+    [".git/config", "消せない"],
+    ["src/CLAUDE.md", "消せない"],
+    [".tasque/current", "制御ファイル"],
+    ["tasque.config.json", "制御ファイル"],
+    ["src/.gitignore", ".gitignore"],
+    ["test/cli.test.ts", "受け入れテスト"],
+  ]) {
+    assert.ok(hasError(withDelete(p), fragment), p);
+  }
+  assert.ok(hasError(withDelete(""), "空でない文字列の配列"));
+});
+
+test("delete: 同じファイルを2つのタスクで消さない", () => {
+  const plan = example();
+  plan.tasks[0].delete = ["src/old.ts"];
+  plan.tasks[1].delete = ["SRC/old.ts"];
+  assert.ok(hasError(validatePlan(plan), "delete と重複"));
 });

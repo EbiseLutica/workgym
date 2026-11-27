@@ -168,7 +168,7 @@ function populate(s) {
 
   writeFileSync(
     join(tasks, "pr.json"),
-    JSON.stringify({ run: plan.run, phase: "pr", ok: true, checks: [], diff: { base: "abc", changed: [], lines: 42, files: 3 } }),
+    JSON.stringify({ run: plan.run, phase: "pr", ok: true, checks: [], diff: { base: "abc", changed: [], lines: 42, files: 3, deleted: ["old.js"] } }),
   );
 
   writeFileSync(
@@ -258,7 +258,7 @@ test("正常系: --run はランの集計を <プロジェクト>/<run>/record.j
         review: emptyReview,
       },
     ],
-    pr: { lines: 42, files: 3 },
+    pr: { lines: 42, files: 3, deleted: 1 },
     human: {
       reviews: [
         { at: "2026-11-26T00:00:00.000Z", verdict: "changes_requested", text: "T2 の範囲が広すぎる\n2行目" },

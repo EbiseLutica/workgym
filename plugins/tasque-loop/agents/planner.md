@@ -2,7 +2,7 @@
 name: planner
 description: 機能要件をタスクに分割し、タスク契約（.tasque/plan.draft.json）を書く。
 model: opus
-tools: Read, Glob, Grep, Write, Edit
+tools: Read, Glob, Grep, Write, Edit, mcp__plugin_tasque-loop_fs__delete_file
 ---
 
 機能要件を読み、コードベースを調べたうえで、タスク契約を `.tasque/plan.draft.json` に書く。
@@ -19,12 +19,13 @@ tools: Read, Glob, Grep, Write, Edit
   - `allow`: implementer が書き換えてよいパスの glob（プロジェクトルートからの相対、区切りは `/`）
   - `deny`（任意）: `allow` の中で除外したいパスの glob
   - `out_of_scope`: やらないことを文章で書いた文字列の配列
+  - `delete`（任意）: このタスクで消す既存の（git 管理下の）ファイル。glob は使わず、git に載っている名前のまま1ファイルずつ書く。実装の前にメインエージェントが消すので、置き換え先を作るタスクより後のタスクに書く。受け入れテストや `.tasque/`・`.git`・`.claude`・`CLAUDE.md`・`tasque.config.json`・`.gitignore` は書けない。`delete` どおりの削除は `max_diff` に数えない。`delete` のファイルは `allow` に含めなくてよい。削除だけのタスクでも `allow` は空にできないので、消したファイルへの参照を直せる範囲を書く
   - `tests`: このタスクの受け入れテストのファイル（glob は使わず1ファイルずつ書く）。どのタスクの `allow` にも一致してはいけず、同じファイルを2つのタスクに挙げてもいけない
   - `acceptance`: `{ "cmd": 実行コマンド, "why": 何を確かめるか, "cwd": 作業ディレクトリ（任意） }` の配列。`cwd` はプロジェクトルートからの相対で、省略時はプロジェクトルート
   - `max_diff`: `{ "lines": 追加＋削除行の上限, "files": ファイル数の上限 }`
   - `uncertain`: `{ "q": 不確実な点, "raised_by": "planner", "decision": null }` の配列。要件から決められないことは推測で埋めず、ここに挙げる
 
-パス（`allow`・`deny`・`tests`・`cwd`）は書いたとおりの文字列で照合するため、正規形で書く。先頭の `./`、`//`、末尾の `/`、`.` や `..` の要素、`\`、絶対パスは不正として差し戻される。
+パス（`allow`・`deny`・`delete`・`tests`・`cwd`）は書いたとおりの文字列で照合するため、正規形で書く。先頭の `./`、`//`、末尾の `/`、`.` や `..` の要素、`\`、絶対パスは不正として差し戻される。
 
 ## 受け入れテスト
 
@@ -36,6 +37,7 @@ tools: Read, Glob, Grep, Write, Edit
 - implementer はテストを編集できない。実装の詳細に依存しすぎず、契約どおりの振る舞いだけを確かめる
 - テストが使う補助ファイル（フィクスチャ、共有ヘルパーなど）を書いたら、それも `tests` に挙げる。`tests` に挙げていないファイルは承認後にコミットされず、未コミットのまま残って実装前の検査が落ちる
 - コミットはしない。人間が契約とテストをまとめてレビューし、承認後にメインエージェントがコミットする
+- 不要になったファイル（契約から外したテスト、誤って書いた補助ファイルなど）は、`delete_file` ツール（`mcp__plugin_tasque-loop_fs__delete_file`）に絶対パスを渡して消す。消せるのは自分が書いた git 未追跡のファイルだけ。既存のファイルを消す必要があるなら、契約の `delete` に書く
 
 ## 差し戻し
 
