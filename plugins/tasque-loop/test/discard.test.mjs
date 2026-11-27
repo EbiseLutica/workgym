@@ -57,6 +57,14 @@ test("短い名前（8.3 形式）でも追跡済みのファイルは消さな�
   assert.ok(existsSync(join(dir, "src", "LongFileName.ts")));
 });
 
+test("代替データストリームや末尾のドット・空白を含むパスは消さない", () => {
+  const { dir } = makeRepo();
+  for (const p of [`${join(dir, "README.md")}:hidden`, `${join(dir, "README.md")}.`, `${join(dir, "README.md")} `]) {
+    assert.throws(() => discardFile(p), /別名/, p);
+  }
+  assert.ok(existsSync(join(dir, "README.md")));
+});
+
 test("worktree の .git ファイルは未追跡でも消さない", () => {
   const { dir, put } = makeRepo();
   put("sub/.git", "gitdir: elsewhere\n");

@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { foldPath, samePath } from "./paths.mjs";
 
 /**
  * 契約の検証段階。
@@ -34,13 +35,9 @@ export function isAllowed(path, task) {
 }
 
 /**
- * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す。
- * 大文字小文字を区別しないファイルシステムと Unicode の正規化の違いを考え、拒否側に倒して照合する。
- * テストファイルの照合はすべてこの関数を通す。
+ * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す（本体は paths.mjs）。テストファイルの照合はすべてこの関数を通す。
  */
-export function samePath(a, b) {
-  return a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase();
-}
+export { samePath };
 
 /**
  * パスがどれかのタスクの受け入れテストなら、そのタスクを返す。なければ undefined。
@@ -102,7 +99,7 @@ const PROTECTED_DIRS = [".git", ".claude"];
 const PROTECTED_FILES = ["claude.md", "claude.local.md"];
 
 /**
- * 小文字に揃えたプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
+ * foldPath で正規化したプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
  */
 export function isProtectedPath(lowerRel) {
   const parts = lowerRel.split("/");
@@ -122,7 +119,7 @@ export const HIDING_FILES = [".gitignore"];
  * 契約の delete に書けないパス（保護パス、tasque の制御ファイルと設定、.gitignore）なら理由を返す。書けるなら null。
  */
 function deletePathError(p) {
-  const lower = p.toLowerCase();
+  const lower = foldPath(p);
   if (isProtectedPath(lower)) return ".git・.claude の中や CLAUDE.md は消せない";
   if (matchesAny(lower, CONTROL_PATHS)) return "tasque の制御ファイルと設定は消せない";
   if (HIDING_FILES.includes(lower.split("/").at(-1))) return ".gitignore は消せない";

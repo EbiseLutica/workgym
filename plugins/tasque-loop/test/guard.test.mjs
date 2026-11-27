@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELETE_TOOL } from "../scripts/lib/discard.mjs";
-import { decide, decideHook, defaultIsIgnored, IMPLEMENTER, toProjectRelative } from "../scripts/lib/guard.mjs";
+import { decide, decideHook, defaultIsIgnored, IMPLEMENTER } from "../scripts/lib/guard.mjs";
+import { toProjectRelative } from "../scripts/lib/paths.mjs";
 import { approvePlan } from "../scripts/lib/run.mjs";
 import { approvableProject, decidedPlan } from "./helpers.mjs";
 

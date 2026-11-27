@@ -1,9 +1,17 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CONTROL_PATHS, HIDING_FILES, isAllowed, isProtectedPath, matchesAny, testOwner } from "./contract.mjs";
-import { DELETE_TOOL, isFullyAbsolute } from "./discard.mjs";
+import { DELETE_TOOL } from "./discard.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
+import {
+  absolutize,
+  foldPath,
+  isFullyAbsolute,
+  isInside,
+  rawComponents,
+  suspiciousComponent,
+  toProjectRelative,
+} from "./paths.mjs";
 import { PLANNER } from "./plan-check.mjs";
 import { loadApproved } from "./run.mjs";
 
@@ -61,7 +69,7 @@ export function decide(
     if (!MODIFY_TOOLS.includes(tool)) return null;
     const target = writeTarget(input, projectDir, base);
     if (target.error) return deny(target.error);
-    const lower = target.rel.toLowerCase();
+    const lower = foldPath(target.rel);
     // 下書きは書き直せるが、消すことはできない
     const draftAllowed = tool !== DELETE_TOOL && PLANNER_ALLOW.includes(lower);
     if (isProtectedPath(lower) || (matchesAny(lower, CONTROL_PATHS) && !draftAllowed)) {
@@ -86,7 +94,7 @@ export function decide(
     return deny(`実行中のタスク契約を読めない: ${e.message}`);
   }
 
-  const lower = rel.toLowerCase();
+  const lower = foldPath(rel);
   if (
     isProtectedPath(lower) ||
     matchesAny(lower, CONTROL_PATHS) ||
@@ -170,33 +178,6 @@ function aliasError(raw, component) {
 }
 
 /**
- * 入力されたパス文字列の要素。先頭のドライブ指定（C:）は要素として扱わない。
- */
-function rawComponents(raw) {
-  const parts = raw.split(/[\\/]+/);
-  if (/^[A-Za-z]:/.test(parts[0])) parts[0] = parts[0].slice(2);
-  return parts;
-}
-
-/**
- * 別名になりうる要素を返す。なければ null。
- * - ":" を含む（NTFS の代替データストリーム）
- * - 末尾がドットか空白（Windows が黙って取り除く）
- * - shortName なら "~数字" を含む（8.3 形式の短い名前）
- */
-function suspiciousComponent(parts, { shortName }) {
-  return (
-    parts.find(
-      (c) =>
-        c !== "" &&
-        c !== "." &&
-        c !== ".." &&
-        (c.includes(":") || /[.\s]$/.test(c) || (shortName && /~\d/.test(c))),
-    ) ?? null
-  );
-}
-
-/**
  * ツール入力に含まれるパスのうち、プロジェクト外を指すものを返す。
  * セッションのスクラッチパッドは読み書きとも、プラグイン自身のディレクトリは読み取りだけ許す。
  * Bash のコマンド文字列は解析しない（サンドボックスで守る）。
@@ -228,47 +209,6 @@ function outsidePaths(input, projectDir, pluginRoot, base) {
     .map(([p]) => p);
 }
 
-/**
- * ツールに渡されたパスをプロジェクトルートからの POSIX 相対パスにする。外を指す場合とルート自身は null。
- * 相対パスは base（既定はプロジェクトルート）から解決し、実在する部分は正式な名前に揃える。
- */
-export function toProjectRelative(projectDir, p, base = projectDir) {
-  const rel = relative(canonicalize(resolve(projectDir)), canonicalize(absolutize(p, base)));
-  if (rel === "" || isAbsolute(rel) || rel.split(sep)[0] === "..") return null;
-  return sep === "\\" ? rel.replaceAll("\\", "/") : rel;
-}
-
-function isInside(root, p, { allowRoot = false, base = root } = {}) {
-  const rel = relative(canonicalize(resolve(root)), canonicalize(absolutize(p, base)));
-  if (rel === "") return allowRoot;
-  return !isAbsolute(rel) && rel.split(/[\\/]/)[0] !== "..";
-}
-
-/**
- * ツールと同じ解釈で絶対パスにする。先頭の ~ はホームディレクトリ、相対パスは base から解決する。
- */
-function absolutize(p, base) {
-  if (p === "~" || /^~[\\/]/.test(p)) return resolve(homedir(), p.slice(2));
-  return resolve(base, p);
-}
-
-/**
- * 実在する最も深い祖先を realpath で正式な名前（長い名前・実際の大文字小文字）にし、残りを付け直す。
- */
-function canonicalize(abs) {
-  const tail = [];
-  let cur = abs;
-  for (;;) {
-    try {
-      return join(realpathSync.native(cur), ...tail.reverse());
-    } catch {
-      const parent = dirname(cur);
-      if (parent === cur) return abs;
-      tail.push(basename(cur));
-      cur = parent;
-    }
-  }
-}
 
 /**
  * .tasque/current が指す承認済みタスクと、同じランの全タスク（テストの保護に使う）を返す。
