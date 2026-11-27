@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { posix } from "node:path";
-import { samePath } from "./paths.mjs";
+import { isSamePath } from "./paths.mjs";
 
 /**
  * git を実行して標準出力を返す。失敗したら例外。
@@ -55,7 +55,7 @@ export function isTrackedLoosely(dir, name) {
   if (r.error || r.status !== 0) {
     throw new Error(r.error?.message ?? (r.stderr.trim() || `git ls-files が ${r.status} で終了した`));
   }
-  return r.stdout.split("\0").some((f) => f !== "" && !f.includes("/") && samePath(f, name));
+  return r.stdout.split("\0").some((f) => f !== "" && !f.includes("/") && isSamePath(f, name));
 }
 
 /**

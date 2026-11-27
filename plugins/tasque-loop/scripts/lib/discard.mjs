@@ -1,7 +1,7 @@
 import { lstatSync, rmSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { isTrackedLoosely } from "./git.mjs";
-import { canonicalize, foldPath, isFullyAbsolute, rawComponents, suspiciousComponent } from "./paths.mjs";
+import { canonicalize, isFullyAbsolute, rawComponents, suspiciousComponent, toNfcLowerPath } from "./paths.mjs";
 
 /** planner・implementer が誤って作ったファイルを消すツール（プラグインの MCP サーバー fs の delete_file）。 */
 export const DELETE_TOOL = "mcp__plugin_tasque-loop_fs__delete_file";
@@ -33,7 +33,7 @@ export function discardFile(path) {
 
   const real = canonicalize(path);
   const names = [...new Set([basename(path), basename(real)])];
-  if (names.some((n) => foldPath(n) === ".git")) throw new DiscardError(`${path} は git の管理用のファイル。消せない`);
+  if (names.some((n) => toNfcLowerPath(n) === ".git")) throw new DiscardError(`${path} は git の管理用のファイル。消せない`);
 
   let tracked;
   try {

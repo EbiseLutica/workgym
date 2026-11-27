@@ -5,11 +5,11 @@ import { DELETE_TOOL } from "./discard.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
 import {
   absolutize,
-  foldPath,
   isFullyAbsolute,
   isInside,
   rawComponents,
   suspiciousComponent,
+  toNfcLowerPath,
   toProjectRelative,
 } from "./paths.mjs";
 import { PLANNER } from "./plan-check.mjs";
@@ -69,7 +69,7 @@ export function decide(
     if (!MODIFY_TOOLS.includes(tool)) return null;
     const target = writeTarget(input, projectDir, base);
     if (target.error) return deny(target.error);
-    const lower = foldPath(target.rel);
+    const lower = toNfcLowerPath(target.rel);
     // 下書きは書き直せるが、消すことはできない
     const draftAllowed = tool !== DELETE_TOOL && PLANNER_ALLOW.includes(lower);
     if (isProtectedPath(lower) || (matchesAny(lower, CONTROL_PATHS) && !draftAllowed)) {
@@ -94,7 +94,7 @@ export function decide(
     return deny(`実行中のタスク契約を読めない: ${e.message}`);
   }
 
-  const lower = foldPath(rel);
+  const lower = toNfcLowerPath(rel);
   if (
     isProtectedPath(lower) ||
     matchesAny(lower, CONTROL_PATHS) ||

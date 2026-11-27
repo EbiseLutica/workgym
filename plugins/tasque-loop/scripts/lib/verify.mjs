@@ -6,10 +6,10 @@ import { CONFIG_FILE, loadConfig, testCommand } from "./config.mjs";
 import {
   isAllowed,
   isDeclaredDelete,
+  isSamePath,
   isTestPath,
   matchesAny,
   portablePathError,
-  samePath,
   validatePlan,
 } from "./contract.mjs";
 import { currentBranch, git, headCommit, isIgnored, isOutsideProject, isTrackedAs, repoLayout } from "./git.mjs";
@@ -419,7 +419,7 @@ function countLines(text) {
  */
 function isTracked(projectDir, file, dirty) {
   const r = spawnSync("git", ["ls-files", "--error-unmatch", "--", file], { cwd: projectDir });
-  return r.status === 0 && !dirty.some((f) => samePath(f, file));
+  return r.status === 0 && !dirty.some((f) => isSamePath(f, file));
 }
 
 function sameList(a, b) {

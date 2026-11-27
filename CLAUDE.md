@@ -18,7 +18,7 @@
 
 使い分け:
 
-- 「同じファイルを指しうるか」の比較（保護パス、受け入れテストの照合など）: `foldPath`・`samePath`
+- 「同じファイルを指しうるか」の比較（保護パス、受け入れテストの照合など）: `toNfcLowerPath`・`isSamePath`
 - ツールに渡されたパスの解決: `absolutize`・`canonicalize`・`toProjectRelative`・`isInside`
 - 別名になりうる書き方の検出: `rawComponents`・`suspiciousComponent`。正規化の前の入力そのものにも使う（realpath は代替データストリームや末尾のドットを黙って落とすため）
 - cwd に依存しない絶対パスか: `isFullyAbsolute`

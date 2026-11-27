@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isAllowed, isTestPath, portablePathError, samePath, validatePlan } from "../scripts/lib/contract.mjs";
+import { isAllowed, isSamePath, isTestPath, portablePathError, validatePlan } from "../scripts/lib/contract.mjs";
 
 const example = () =>
   JSON.parse(readFileSync(new URL("../examples/plan.example.json", import.meta.url), "utf8"));
@@ -131,10 +131,10 @@ test("acceptance の cwd は任意で、正規形のプロジェクト相対パ�
   }
 });
 
-test("samePath・isTestPath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
-  assert.equal(samePath("Test/A.ts", "test/a.ts"), true);
-  assert.equal(samePath("test/が.ts", "test/か\u3099.ts"), true);
-  assert.equal(samePath("test/a.ts", "test/b.ts"), false);
+test("isSamePath・isTestPath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
+  assert.equal(isSamePath("Test/A.ts", "test/a.ts"), true);
+  assert.equal(isSamePath("test/が.ts", "test/か\u3099.ts"), true);
+  assert.equal(isSamePath("test/a.ts", "test/b.ts"), false);
   const plan = example();
   assert.equal(isTestPath("TEST/CLI.test.ts", plan), true);
   assert.equal(isTestPath("test/cli.test.ts", plan.tasks.slice(0, 1)), false);

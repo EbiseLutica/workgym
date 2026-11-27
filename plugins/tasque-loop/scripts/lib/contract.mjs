@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { foldPath, samePath } from "./paths.mjs";
+import { isSamePath, toNfcLowerPath } from "./paths.mjs";
 
 /**
  * 契約の検証段階。
@@ -37,7 +37,7 @@ export function isAllowed(path, task) {
 /**
  * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す（本体は paths.mjs）。テストファイルの照合はすべてこの関数を通す。
  */
-export { samePath };
+export { isSamePath };
 
 /**
  * パスがどれかのタスクの受け入れテストなら、そのタスクを返す。なければ undefined。
@@ -45,7 +45,7 @@ export { samePath };
  */
 export function testOwner(path, planOrTasks) {
   const tasks = Array.isArray(planOrTasks) ? planOrTasks : planOrTasks.tasks;
-  return tasks.find((t) => (t.tests ?? []).some((x) => samePath(x, path)));
+  return tasks.find((t) => (t.tests ?? []).some((x) => isSamePath(x, path)));
 }
 
 /**
@@ -99,7 +99,7 @@ const PROTECTED_DIRS = [".git", ".claude"];
 const PROTECTED_FILES = ["claude.md", "claude.local.md"];
 
 /**
- * foldPath で正規化したプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
+ * toNfcLowerPath で正規化したプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
  */
 export function isProtectedPath(lowerRel) {
   const parts = lowerRel.split("/");
@@ -119,7 +119,7 @@ export const HIDING_FILES = [".gitignore"];
  * 契約の delete に書けないパス（保護パス、tasque の制御ファイルと設定、.gitignore）なら理由を返す。書けるなら null。
  */
 function deletePathError(p) {
-  const lower = foldPath(p);
+  const lower = toNfcLowerPath(p);
   if (isProtectedPath(lower)) return ".git・.claude の中や CLAUDE.md は消せない";
   if (matchesAny(lower, CONTROL_PATHS)) return "tasque の制御ファイルと設定は消せない";
   if (HIDING_FILES.includes(lower.split("/").at(-1))) return ".gitignore は消せない";
@@ -248,10 +248,10 @@ function checkDeletesAcrossTasks(tasks, err) {
   const listed = [];
   for (const task of valid) {
     for (const p of task.delete) {
-      const dup = listed.find((x) => samePath(x.path, p));
+      const dup = listed.find((x) => isSamePath(x.path, p));
       if (dup) err(`${label(task)}.delete`, `${p} は ${label(dup.task)} の delete と重複している`);
       else listed.push({ path: p, task });
-      const owner = tasks.find((t) => isObject(t) && Array.isArray(t.tests) && t.tests.some((x) => samePath(x, p)));
+      const owner = tasks.find((t) => isObject(t) && Array.isArray(t.tests) && t.tests.some((x) => isSamePath(x, p)));
       if (owner) err(`${label(task)}.delete`, `${p} は ${label(owner)} の受け入れテスト`);
     }
   }
@@ -269,7 +269,7 @@ function checkTestsAcrossTasks(tasks, err) {
   const listed = [];
   for (const task of valid) {
     for (const t of task.tests) {
-      const dup = listed.find((x) => samePath(x.path, t));
+      const dup = listed.find((x) => isSamePath(x.path, t));
       if (dup) err(`${label(task)}.tests`, `${t} は ${label(dup.task)} の tests と重複している`);
       else listed.push({ path: t, task });
     }

@@ -11,15 +11,15 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 /**
  * 比較用に正規化した形（NFC にして小文字にする）。保護パスの判定など、「同じファイルを指しうるか」で照合するときに使う。
  */
-export function foldPath(p) {
+export function toNfcLowerPath(p) {
   return p.normalize("NFC").toLowerCase();
 }
 
 /**
- * 2つのパスが同じファイルを指しうるかを返す。拒否側に倒して照合する（foldPath で比べる）。
+ * 2つのパスが同じファイルを指しうるかを返す。拒否側に倒して照合する（toNfcLowerPath で比べる）。
  */
-export function samePath(a, b) {
-  return foldPath(a) === foldPath(b);
+export function isSamePath(a, b) {
+  return toNfcLowerPath(a) === toNfcLowerPath(b);
 }
 
 /**

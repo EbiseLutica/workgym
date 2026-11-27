@@ -4,20 +4,20 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  foldPath,
   isFullyAbsolute,
   isInside,
+  isSamePath,
   rawComponents,
-  samePath,
   suspiciousComponent,
+  toNfcLowerPath,
   toProjectRelative,
 } from "../scripts/lib/paths.mjs";
 
-test("foldPath・samePath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
-  assert.equal(foldPath("Src/CLAUDE.md"), "src/claude.md");
-  assert.equal(foldPath("test/か\u3099.ts"), foldPath("test/が.ts"));
-  assert.equal(samePath("Test/A.ts", "test/a.ts"), true);
-  assert.equal(samePath("test/a.ts", "test/b.ts"), false);
+test("toNfcLowerPath・isSamePath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
+  assert.equal(toNfcLowerPath("Src/CLAUDE.md"), "src/claude.md");
+  assert.equal(toNfcLowerPath("test/か\u3099.ts"), toNfcLowerPath("test/が.ts"));
+  assert.equal(isSamePath("Test/A.ts", "test/a.ts"), true);
+  assert.equal(isSamePath("test/a.ts", "test/b.ts"), false);
 });
 
 test("isFullyAbsolute はドライブやルートまで含むパスだけを絶対パスとみなす", () => {
