@@ -93,6 +93,34 @@ export function portablePathError(p) {
 }
 
 /**
+ * どの階層にあっても tasque-loop のエージェントに書かせない名前（小文字）。
+ * - ディレクトリ: git の内部状態と Claude Code の設定
+ * - ファイル: 後続のエージェントに読み込まれる指示ファイル（入れ子の CLAUDE.md を含む）
+ * glob の ** はドットで始まるディレクトリをまたがないため、パスの要素ごとに照合する。
+ */
+const PROTECTED_DIRS = [".git", ".claude"];
+const PROTECTED_FILES = ["claude.md", "claude.local.md"];
+
+/**
+ * 小文字に揃えたプロジェクト相対パスが、.git・.claude の中か、CLAUDE.md・CLAUDE.local.md を指すか。
+ */
+export function isProtectedPath(lowerRel) {
+  const parts = lowerRel.split("/");
+  return parts.some((c) => PROTECTED_DIRS.includes(c)) || PROTECTED_FILES.includes(parts.at(-1));
+}
+
+/**
+ * 契約の delete に書けないパス（保護パス、tasque の制御ファイルと設定、.gitignore）なら理由を返す。書けるなら null。
+ */
+function deletePathError(p) {
+  const lower = p.toLowerCase();
+  if (isProtectedPath(lower)) return ".git・.claude の中や CLAUDE.md は消せない";
+  if (lower.split("/")[0] === ".tasque" || lower === "tasque.config.json") return "tasque の制御ファイルと設定は消せない";
+  if (lower.split("/").at(-1) === ".gitignore") return ".gitignore は消せない";
+  return null;
+}
+
+/**
  * ラン単位の契約（plan）を検証し、エラーメッセージの配列を返す。空配列なら妥当。
  */
 export function validatePlan(plan, { stage = "draft" } = {}) {
@@ -140,6 +168,14 @@ export function validatePlan(plan, { stage = "draft" } = {}) {
     }
     checkStringArray(task.out_of_scope, `${where}.out_of_scope`, err);
 
+    if (checkStringArray(task.delete ?? [], `${where}.delete`, err)) {
+      for (const p of task.delete ?? []) {
+        checkCanonical(p, `${where}.delete`, err, { glob: false });
+        const msg = deletePathError(p);
+        if (msg) err(`${where}.delete`, `${p}: ${msg}`);
+      }
+    }
+
     if (checkStringArray(task.tests, `${where}.tests`, err)) {
       task.tests.forEach((t) => checkCanonical(t, `${where}.tests`, err, { glob: false }));
     }
@@ -184,7 +220,34 @@ export function validatePlan(plan, { stage = "draft" } = {}) {
   });
 
   checkTestsAcrossTasks(plan.tasks, err);
+  checkDeletesAcrossTasks(plan.tasks, err);
   return errors;
+}
+
+/**
+ * 削除するファイルのリスト（delete）を、そのタスクに挙がっているかで判定する。
+ */
+export function isDeclaredDelete(path, task) {
+  return (task.delete ?? []).some((p) => samePath(p, path));
+}
+
+/**
+ * ラン全体での delete の検査。
+ * - 同じファイルを2つのタスク（または同じタスク内で2回）で消さない
+ * - どのタスクの受け入れテストも消さない
+ */
+function checkDeletesAcrossTasks(tasks, err) {
+  const valid = tasks.filter((t) => isObject(t) && Array.isArray(t.delete) && t.delete.every(isNonEmptyString));
+  const listed = [];
+  for (const task of valid) {
+    for (const p of task.delete) {
+      const dup = listed.find((x) => samePath(x.path, p));
+      if (dup) err(`${label(task)}.delete`, `${p} は ${label(dup.task)} の delete と重複している`);
+      else listed.push({ path: p, task });
+      const owner = tasks.find((t) => isObject(t) && Array.isArray(t.tests) && t.tests.some((x) => samePath(x, p)));
+      if (owner) err(`${label(task)}.delete`, `${p} は ${label(owner)} の受け入れテスト`);
+    }
+  }
 }
 
 /**

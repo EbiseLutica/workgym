@@ -3,8 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runCommand } from "./command.mjs";
 import { CONFIG_FILE, loadConfig, testCommand } from "./config.mjs";
-import { isAllowed, isTestPath, matchesAny, portablePathError, samePath, validatePlan } from "./contract.mjs";
-import { currentBranch, git, headCommit, isIgnored, isOutsideProject, repoLayout } from "./git.mjs";
+import {
+  isAllowed,
+  isDeclaredDelete,
+  isTestPath,
+  matchesAny,
+  portablePathError,
+  samePath,
+  validatePlan,
+} from "./contract.mjs";
+import { currentBranch, git, headCommit, isIgnored, isOutsideProject, isTrackedAs, repoLayout } from "./git.mjs";
 import { draftDigest, draftPaths } from "./plan-check.mjs";
 import { baselinePath, loadApproval, runPaths, sha256Of, taskFile } from "./run.mjs";
 
@@ -105,7 +113,9 @@ export function statusMark(r) {
 
 /**
  * 実装前の検査。作業ツリーがクリーンで、planner のテストがコミット済みで、ベースブランチの上にいないことを確かめる。
- * 通れば HEAD をこのタスクの基点として記録する。基点の記録がすでにあるタスクには使えない（基点を動かさないため）。
+ * 契約の delete に挙がったファイルがあれば、それらが追跡済みで実在することも確かめる。
+ * 通れば HEAD をこのタスクの基点として記録し、delete のファイルを git rm で消す（削除はこのタスクの変更になる）。
+ * 基点の記録がすでにあるタスクには使えない（基点を動かさないため）。
  */
 export async function verifyPre(projectDir, run, taskId) {
   const { plan, task } = load(projectDir, run, taskId);
@@ -131,13 +141,25 @@ export async function verifyPre(projectDir, run, taskId) {
     ),
   );
 
+  const deletes = task.delete ?? [];
+  const untracked = deletes.filter((p) => !isTrackedAs(projectDir, p));
+  checks.push(
+    check("delete_tracked", untracked.length === 0, untracked.length ? `追跡済みのファイルではない: ${untracked.join(", ")}` : ""),
+  );
+
   const result = { ...finish(run, taskId, "pre", checks), warnings };
-  if (result.ok) writeState(projectDir, run, taskId, { base: headCommit(projectDir) });
+  if (result.ok) {
+    writeState(projectDir, run, taskId, { base: headCommit(projectDir) });
+    if (deletes.length > 0) git(projectDir, ["--literal-pathspecs", "rm", "-q", "--", ...deletes]);
+    result.deleted = deletes;
+  }
   return save(projectDir, run, `${taskId}.pre`, result);
 }
 
 /**
  * 実装後の検査。基点からの変更が許可リストと diff 上限に収まり、どのタスクのテストも手つかずで、受け入れコマンドが通ることを確かめる。
+ * 追跡済みのファイルの削除は、契約の delete に挙がったものだけを認める（allow に一致していても、宣言のない削除は scope で落とす）。
+ * delete に挙がったファイルは消えたままでなければならず、diff 上限の行数とファイル数には数えない（件数は diff.deleted に残す）。
  * 受け入れコマンドが作業ツリーを書き換えうるため、変更の一覧はコマンドの前後で取り、判定は後の一覧で行う。
  */
 export async function verifyPost(projectDir, run, taskId) {
@@ -155,27 +177,38 @@ export async function verifyPost(projectDir, run, taskId) {
   const moved = !sameList(before, changed);
   const note = moved ? `（受け入れコマンドの実行中に変更の一覧が変わった。実行前: ${before.join(", ") || "なし"}）` : "";
 
+  const removed = deletedSince(layout, base);
+  const declared = removed.filter((f) => isDeclaredDelete(f, task));
+
   const checks = [];
-  const outside = changed.filter((f) => isOutsideProject(f) || !isAllowed(f, task));
+  const outside = changed.filter(
+    (f) => isOutsideProject(f) || (removed.includes(f) ? !isDeclaredDelete(f, task) : !isAllowed(f, task)),
+  );
   checks.push(check("scope", outside.length === 0, (outside.length ? `許可リスト外: ${outside.join(", ")}` : "") + note));
+
+  // git rm の後に作り直したファイルは、未追跡のまま差分上は削除に見えるので、ディスク上の有無も見る
+  const remaining = (task.delete ?? []).filter(
+    (p) => !declared.some((f) => samePath(f, p)) || existsSync(join(projectDir, p)),
+  );
+  checks.push(check("delete_done", remaining.length === 0, remaining.length ? `消えていない: ${remaining.join(", ")}` : ""));
 
   const touched = changed.filter((f) => isTestPath(f, plan));
   checks.push(check("tests_unchanged", touched.length === 0, (touched.length ? `変更された: ${touched.join(", ")}` : "") + note));
 
   checks.push(portableNamesCheck(projectDir, changed));
 
-  const size = diffSize(projectDir, layout, base, changed, config.diff_exclude);
+  const size = diffSize(projectDir, layout, base, changed, config.diff_exclude, { skip: declared });
   checks.push(
     check(
       "max_diff",
       size.lines <= task.max_diff.lines && size.files <= task.max_diff.files,
-      `${size.lines}/${task.max_diff.lines} 行、${size.files}/${task.max_diff.files} ファイル`,
+      `${size.lines}/${task.max_diff.lines} 行、${size.files}/${task.max_diff.files} ファイル${deletedNote(declared)}`,
     ),
   );
   checks.push(...commandChecks);
 
   const result = finish(run, taskId, "post", checks);
-  result.diff = { base, changed, ...size, ...(moved ? { before_commands: before } : {}) };
+  result.diff = { base, changed, ...size, deleted: declared, ...(moved ? { before_commands: before } : {}) };
   appendPostHistory(projectDir, run, taskId, {
     at: new Date().toISOString(),
     ok: result.ok,
@@ -188,9 +221,9 @@ export async function verifyPost(projectDir, run, taskId) {
 /**
  * PR 前の検査。承認時の基点コミットからのラン全体の変更について、次を確かめる。
  * - 作業ツリーがクリーン（コマンドの実行前後とも）
- * - 変更がプロジェクト内で、どれかのタスクの範囲に収まる
+ * - 変更がプロジェクト内で、どれかのタスクの範囲に収まる（追跡済みのファイルの削除は、どれかのタスクの delete に挙がっている）
  * - テストファイルの中身が承認時のハッシュと一致する
- * - PR の上限を超えない
+ * - PR の上限を超えない（delete に挙がったファイルの削除は行数にもファイル数にも数えず、diff.deleted に残す）
  * - test_cmd があれば全体テストが通り、全タスクの受け入れコマンドが通る
  */
 export async function verifyPr(projectDir, run) {
@@ -219,8 +252,14 @@ export async function verifyPr(projectDir, run) {
   checks.push(check("clean_tree", dirty.length === 0, dirty.length ? `未コミットの変更: ${dirty.join(", ")}` : ""));
 
   const changed = changedSince(layout, base, { committedOnly: true });
+  const removed = deletedSince(layout, base, { committedOnly: true });
+  const declared = removed.filter((f) => plan.tasks.some((t) => isDeclaredDelete(f, t)));
   const orphan = changed.filter(
-    (f) => isOutsideProject(f) || !plan.tasks.some((t) => isAllowed(f, t) || isTestPath(f, [t])),
+    (f) =>
+      isOutsideProject(f) ||
+      (removed.includes(f)
+        ? !declared.includes(f)
+        : !plan.tasks.some((t) => isAllowed(f, t) || isTestPath(f, [t]))),
   );
   checks.push(check("scope", orphan.length === 0, orphan.length ? `どのタスクにも属さない: ${orphan.join(", ")}` : ""));
   checks.push(portableNamesCheck(projectDir, changed));
@@ -228,17 +267,23 @@ export async function verifyPr(projectDir, run) {
   const tampered = testsTampered(projectDir, plan, approval);
   checks.push(check("tests_intact", tampered.length === 0, tampered.length ? `承認時と違う: ${tampered.join(", ")}` : ""));
 
-  const size = diffSize(projectDir, layout, base, changed, config.diff_exclude, { committedOnly: true });
+  const size = diffSize(projectDir, layout, base, changed, config.diff_exclude, { committedOnly: true, skip: declared });
   checks.push(
     check(
       "pr_size",
       size.lines <= config.pr.max_lines && size.files <= config.pr.max_files,
-      `${size.lines}/${config.pr.max_lines} 行、${size.files}/${config.pr.max_files} ファイル`,
+      `${size.lines}/${config.pr.max_lines} 行、${size.files}/${config.pr.max_files} ファイル${deletedNote(declared)}`,
     ),
   );
   checks.push(...commandChecks);
 
-  const result = { run, phase: "pr", ok: checks.every((c) => c.ok), checks, diff: { base, changed, ...size } };
+  const result = {
+    run,
+    phase: "pr",
+    ok: checks.every((c) => c.ok),
+    checks,
+    diff: { base, changed, ...size, deleted: declared },
+  };
   return save(projectDir, run, "pr", result);
 }
 
@@ -300,12 +345,29 @@ function changedSince(layout, base, { committedOnly = false } = {}) {
 }
 
 /**
- * 追加行＋削除行と、ファイル数。diff_exclude に一致するファイルはどちらにも数えない。
+ * 基点から消えた追跡済みのファイルを、プロジェクトからの相対パスで返す。範囲の考え方は changedSince と同じ。
+ */
+function deletedSince(layout, base, { committedOnly = false } = {}) {
+  const range = committedOnly ? [base, "HEAD"] : [base];
+  return git(layout.top, ["diff", "--name-only", "--no-renames", "--diff-filter=D", "-z", ...range])
+    .split("\0")
+    .filter(Boolean)
+    .map(layout.toRel)
+    .filter((f) => !f.startsWith(".tasque/"))
+    .sort();
+}
+
+function deletedNote(deleted) {
+  return deleted.length > 0 ? `（ほかに削除 ${deleted.length} ファイル。上限には数えない）` : "";
+}
+
+/**
+ * 追加行＋削除行と、ファイル数。diff_exclude に一致するファイルと skip（契約どおりに消したファイル）はどちらにも数えない。
  * git がバイナリとみなしたファイル（numstat が "-"。.gitattributes の -diff を含む）は、変更前と変更後の行数の合計を変更行数とみなす。
  * textconv や外部 diff で行数を小さく見せられないよう、どちらも無効にする。
  */
-function diffSize(projectDir, layout, base, changed, exclude, { committedOnly = false } = {}) {
-  const counted = changed.filter((f) => !matchesAny(f, exclude));
+function diffSize(projectDir, layout, base, changed, exclude, { committedOnly = false, skip = [] } = {}) {
+  const counted = changed.filter((f) => !matchesAny(f, exclude) && !skip.includes(f));
   const range = committedOnly ? [base, "HEAD"] : [base];
   const numstat = new Map();
   const out = git(layout.top, ["diff", "--numstat", "--no-renames", "--no-textconv", "--no-ext-diff", "-z", ...range]);

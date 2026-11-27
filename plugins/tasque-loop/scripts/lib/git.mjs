@@ -34,6 +34,17 @@ export function isIgnored(cwd, rel) {
 }
 
 /**
+ * cwd からの相対パス rel が、その名前のまま（大文字小文字も含めて）インデックスに載っているか。git のエラーは例外。
+ */
+export function isTrackedAs(cwd, rel) {
+  const r = spawnSync("git", ["--literal-pathspecs", "ls-files", "-z", "--", rel], { cwd, encoding: "utf8" });
+  if (r.error || r.status !== 0) {
+    throw new Error(r.error?.message ?? (r.stderr.trim() || `git ls-files が ${r.status} で終了した`));
+  }
+  return r.stdout === `${rel}\0`;
+}
+
+/**
  * プロジェクト（tasque.config.json と .tasque のあるディレクトリ）とリポジトリの位置関係。
  * git の出力はリポジトリルートからのパスで受け取り、ここでプロジェクトからの相対パスに直す。
  * - top: リポジトリのルート（git コマンドはここで実行する）

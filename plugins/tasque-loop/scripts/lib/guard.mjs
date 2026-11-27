@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { isAllowed, matchesAny, testOwner } from "./contract.mjs";
+import { isAllowed, isProtectedPath as isProtected, matchesAny, testOwner } from "./contract.mjs";
 import { DELETE_TOOL, isFullyAbsolute } from "./discard.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
 import { PLANNER } from "./plan-check.mjs";
@@ -17,15 +17,6 @@ const WRITE_TOOLS = ["Edit", "Write"];
 const MODIFY_TOOLS = [...WRITE_TOOLS, DELETE_TOOL];
 /** 呼び出し元へ報告を返すためのツール。これを拒否すると報告が届かない。 */
 const REPORT_TOOLS = ["SubagentHandback"];
-
-/**
- * どの階層にあっても tasque-loop のエージェントに書かせない名前（小文字）。
- * - ディレクトリ: git の内部状態と Claude Code の設定
- * - ファイル: 後続のエージェントに読み込まれる指示ファイル（入れ子の CLAUDE.md を含む）
- * glob の ** はドットで始まるディレクトリをまたがないため、パスの要素ごとに照合する。
- */
-const PROTECTED_DIRS = [".git", ".claude"];
-const PROTECTED_FILES = ["claude.md", "claude.local.md"];
 
 /**
  * 契約の allow に関係なく implementer に書かせないパス。
@@ -210,11 +201,6 @@ function suspiciousComponent(parts, { shortName }) {
         (c.includes(":") || /[.\s]$/.test(c) || (shortName && /~\d/.test(c))),
     ) ?? null
   );
-}
-
-function isProtected(lowerRel) {
-  const parts = lowerRel.split("/");
-  return parts.some((c) => PROTECTED_DIRS.includes(c)) || PROTECTED_FILES.includes(parts.at(-1));
 }
 
 /**

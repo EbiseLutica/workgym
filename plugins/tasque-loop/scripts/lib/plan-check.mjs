@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalPathError, validatePlan } from "./contract.mjs";
+import { isTrackedAs } from "./git.mjs";
 
 export const PLANNER = "tasque-loop:planner";
 export const MAX_ATTEMPTS = 3;
@@ -117,11 +118,25 @@ function checkDraft(projectDir, file) {
   }
   const errors = validatePlan(plan, { stage: "draft" });
   if (errors.length > 0) return errors;
-  return plan.tasks.flatMap((task) =>
+  const missingTests = plan.tasks.flatMap((task) =>
     (task.tests ?? [])
       .filter((t) => !existsSync(join(projectDir, t)))
       .map((t) => `${task.id}: テスト ${t} がない。契約と一緒にテストファイルも書く`),
   );
+  const badDeletes = plan.tasks.flatMap((task) =>
+    (task.delete ?? [])
+      .filter((p) => !existsSync(join(projectDir, p)) || !trackedOrFalse(projectDir, p))
+      .map((p) => `${task.id}: delete の ${p} が git の管理下にない。delete には既存の追跡済みファイルを、その名前のまま書く`),
+  );
+  return [...missingTests, ...badDeletes];
+}
+
+function trackedOrFalse(projectDir, p) {
+  try {
+    return isTrackedAs(projectDir, p);
+  } catch {
+    return false;
+  }
 }
 
 export function readJson(file) {

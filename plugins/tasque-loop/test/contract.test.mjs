@@ -148,3 +148,32 @@ test("portablePathError は Windows で扱えない名前を指摘し、普通�
     assert.notEqual(portablePathError(p), null, p);
   }
 });
+
+test("delete: 1ファイルずつ正規形で書き、保護パスと受け入れテストは消せない", () => {
+  const withDelete = (...paths) => {
+    const plan = example();
+    plan.tasks[0].delete = paths;
+    return validatePlan(plan);
+  };
+  assert.deepEqual(withDelete("src/old.ts", "docs/old.md"), []);
+  for (const [p, fragment] of [
+    ["src/*.ts", "glob"],
+    ["./src/old.ts", ". は使えない"],
+    [".git/config", "消せない"],
+    ["src/CLAUDE.md", "消せない"],
+    [".tasque/current", "制御ファイル"],
+    ["tasque.config.json", "制御ファイル"],
+    ["src/.gitignore", ".gitignore"],
+    ["test/cli.test.ts", "受け入れテスト"],
+  ]) {
+    assert.ok(hasError(withDelete(p), fragment), p);
+  }
+  assert.ok(hasError(withDelete(""), "空でない文字列の配列"));
+});
+
+test("delete: 同じファイルを2つのタスクで消さない", () => {
+  const plan = example();
+  plan.tasks[0].delete = ["src/old.ts"];
+  plan.tasks[1].delete = ["SRC/old.ts"];
+  assert.ok(hasError(validatePlan(plan), "delete と重複"));
+});

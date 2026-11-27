@@ -106,3 +106,14 @@ test("別の planner 呼び出しでは回数を数え直す", () => {
   assert.equal(stop("a2")?.decision, "block");
   assert.equal(status().attempts, 1);
 });
+
+test("delete に git の管理下にないファイルがあれば差し戻す", () => {
+  const plan = JSON.parse(example());
+  plan.tasks[0].delete = ["src/old.ts"];
+  const { dir, stop } = setup(JSON.stringify(plan));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "old.ts"), "");
+  const r = stop();
+  assert.equal(r?.decision, "block");
+  assert.match(r.reason, /delete の src\/old\.ts が git の管理下にない/);
+});
