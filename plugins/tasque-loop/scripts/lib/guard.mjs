@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isAllowed, matchesAny, testOwner } from "./contract.mjs";
+import { DELETE_TOOL, isFullyAbsolute } from "./discard.mjs";
 import { isIgnored, resolveProjectDir } from "./git.mjs";
 import { PLANNER } from "./plan-check.mjs";
 import { loadApproved } from "./run.mjs";
@@ -12,6 +13,8 @@ const AGENT_PREFIX = "tasque-loop:";
 /** implementer が使ってよいツール。これ以外は理由を問わず拒否する。 */
 const READ_TOOLS = ["Read", "Glob", "Grep"];
 const WRITE_TOOLS = ["Edit", "Write"];
+/** 書き込みと同じ判定で守るツール。削除ツールは planner・implementer だけが使え、判定を通れば許可する。 */
+const MODIFY_TOOLS = [...WRITE_TOOLS, DELETE_TOOL];
 /** 呼び出し元へ報告を返すためのツール。これを拒否すると報告が届かない。 */
 const REPORT_TOOLS = ["SubagentHandback"];
 
@@ -40,9 +43,12 @@ const PLANNER_ALLOW = [".tasque/plan.draft.json"];
 
 /**
  * PreToolUse の入力から判定を返す。null は「判定なし」（通常の権限フローに任せる）。
- * 1. tasque-loop の実行中（.tasque/current がある）か tasque-loop のエージェントなら、プロジェクト外へのファイル操作を拒否する
- * 2. planner の書き込みは、保護パス（.tasque の制御ファイル・.git・.claude・CLAUDE.md）を拒否する
- * 3. implementer なら、さらに実行中タスクの許可リストで書き込みを制限し、ラン内のどのタスクのテストも、git が無視するパスも拒否する
+ * 1. 削除ツールは planner と implementer 以外には使わせない
+ * 2. tasque-loop の実行中（.tasque/current がある）か tasque-loop のエージェントなら、プロジェクト外へのファイル操作を拒否する
+ * 3. planner の書き込みと削除は、保護パス（.tasque の制御ファイル・.git・.claude・CLAUDE.md）を拒否する
+ * 4. implementer なら、さらに実行中タスクの許可リストで書き込みと削除を制限し、ラン内のどのタスクのテストも、git が無視するパスも拒否する
+ * 削除ツールは、判定を通れば許可（allow）を返す。ヘッドレスでは許可がないと権限の確認で拒否されるため。
+ * 消せるのが未追跡のファイルだけであることは、MCP サーバーの側で確かめる。
  * 契約が読めない、git に問い合わせられないなどの異常はすべて拒否に倒す。
  */
 export function decide(
@@ -55,28 +61,34 @@ export function decide(
     isIgnored = defaultIsIgnored,
   },
 ) {
+  const tool = input.tool_name;
+  if (tool === DELETE_TOOL && input.agent_type !== PLANNER && input.agent_type !== IMPLEMENTER) {
+    return deny(`${tool} は tasque-loop の planner と implementer だけが使える`);
+  }
+
   const isTasqueAgent = typeof input.agent_type === "string" && input.agent_type.startsWith(AGENT_PREFIX);
   if (!isTasqueAgent && !runActive(projectDir)) return null;
 
-  const tool = input.tool_name;
   const base = typeof input.cwd === "string" && input.cwd !== "" ? input.cwd : projectDir;
   const outside = outsidePaths(input, projectDir, pluginRoot, base);
   if (outside.length > 0) return deny(`${outside.join(", ")} はプロジェクトの外。tasque-loop の実行中はアクセスできない`);
 
   if (input.agent_type === PLANNER) {
-    if (!WRITE_TOOLS.includes(tool)) return null;
+    if (!MODIFY_TOOLS.includes(tool)) return null;
     const target = writeTarget(input, projectDir, base);
     if (target.error) return deny(target.error);
     const lower = target.rel.toLowerCase();
-    if (isProtected(lower) || (matchesAny(lower, PLANNER_DENY) && !PLANNER_ALLOW.includes(lower))) {
+    // 下書きは書き直せるが、消すことはできない
+    const draftAllowed = tool !== DELETE_TOOL && PLANNER_ALLOW.includes(lower);
+    if (isProtected(lower) || (matchesAny(lower, PLANNER_DENY) && !draftAllowed)) {
       return deny(`${target.rel} は planner が書き換えてはいけない`);
     }
-    return null;
+    return permit(tool, target.rel);
   }
 
   if (input.agent_type !== IMPLEMENTER) return null;
   if (READ_TOOLS.includes(tool) || REPORT_TOOLS.includes(tool)) return null;
-  if (!WRITE_TOOLS.includes(tool)) return deny(`implementer は ${tool} を使えない`);
+  if (!MODIFY_TOOLS.includes(tool)) return deny(`implementer は ${tool} を使えない`);
 
   const target = writeTarget(input, projectDir, base);
   if (target.error) return deny(target.error);
@@ -117,7 +129,7 @@ export function decide(
     return deny(`${rel} が git に無視されるかを確かめられない: ${e.message}`);
   }
   if (ignored) return deny(`${rel} は git に無視されるパス。検査で変更を追えないため書き換えられない`);
-  return null;
+  return permit(tool, rel);
 }
 
 /**
@@ -140,7 +152,8 @@ export function decideHook(input, { envProjectDir, pluginRoot, resolveDir = reso
 }
 
 /**
- * Edit・Write の対象をプロジェクトルートからの POSIX 相対パスにする。
+ * Edit・Write・削除ツールの対象をプロジェクトルートからの POSIX 相対パスにする。
+ * 削除ツールの対象は絶対パスに限る（MCP サーバーはサブエージェントと別の cwd で動くため）。
  * 短い名前（8.3 形式）・代替データストリーム・末尾のドットや空白など、
  * Windows で別名として同じファイルを指しうる書き方は { error } で拒否する。
  */
@@ -148,6 +161,7 @@ function writeTarget(input, projectDir, base) {
   const tool = input.tool_name;
   const raw = input.tool_input?.file_path;
   if (typeof raw !== "string" || raw === "") return { error: `${tool} の対象パスが読めない` };
+  if (tool === DELETE_TOOL && !isFullyAbsolute(raw)) return { error: `${raw} は絶対パスではない。削除は絶対パスで指定する` };
 
   // POSIX ではバックスラッシュは区切りではなくファイル名の一部になり、照合したパスと実際に書くファイルがずれる
   if (process.platform !== "win32" && raw.includes("\\")) {
@@ -217,6 +231,7 @@ function outsidePaths(input, projectDir, pluginRoot, base) {
     Read: [[ti.file_path, base]],
     Write: [[ti.file_path, base]],
     Edit: [[ti.file_path, base]],
+    [DELETE_TOOL]: [[ti.file_path, base]],
     Glob: [
       [ti.path, base],
       [ti.pattern, globBase],
@@ -293,6 +308,20 @@ function defaultRunActive(projectDir) {
 
 /** git check-ignore でパスが無視されるかを返す。git が使えない・エラーのときは例外。 */
 export const defaultIsIgnored = isIgnored;
+
+/**
+ * 判定を通った操作の結果。Edit・Write は通常の権限フローに任せ（null）、削除ツールは許可する。
+ */
+function permit(tool, rel) {
+  if (tool !== DELETE_TOOL) return null;
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: `[tasque-loop] ${rel} は消してよい（未追跡のファイルに限る）`,
+    },
+  };
+}
 
 function deny(reason) {
   return {

@@ -64,7 +64,7 @@ argument-hint: <issue URL | issue番号 | 本文テキスト | ファイルパ�
 2. 終わったら `.tasque/plan.draft.check.json` を読む。信用するのは `ok: true` だけ
    - `ok: false`（差し戻しの上限に達した）なら、`errors` を人間に見せて止める
    - `agent_id` が今回呼んだ planner の ID と違えば、検査のフックが動いていない（前回の結果が残っている）。人間に見せて止める
-3. `git status --porcelain` で、`tests` に挙げたファイルのほかに未コミットの変更がないかを確かめる。あれば（planner が補助ファイルを書いた、など）、そのままだと最初のタスクの pre が落ちるので、planner に `tests` へ含めるか消すよう指示して 2 からやり直す
+3. `git status --porcelain` で、`tests` に挙げたファイルのほかに未コミットの変更がないかを確かめる。あれば（planner が補助ファイルを書いた、など）、そのままだと最初のタスクの pre が落ちるので、planner に `tests` へ含めるか、`delete_file` ツールで消すよう指示して 2 からやり直す。人間のレビューでテストを外すよう言われたときも、外したファイルを planner に消させる。メインエージェントは代わりに消さない
 4. `node $S/verify.mjs --phase red` を実行する
 
 ## 3. 人間のレビュー

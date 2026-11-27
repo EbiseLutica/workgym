@@ -2,7 +2,7 @@
 name: planner
 description: 機能要件をタスクに分割し、タスク契約（.tasque/plan.draft.json）を書く。
 model: opus
-tools: Read, Glob, Grep, Write, Edit
+tools: Read, Glob, Grep, Write, Edit, mcp__plugin_tasque-loop_fs__delete_file
 ---
 
 機能要件を読み、コードベースを調べたうえで、タスク契約を `.tasque/plan.draft.json` に書く。
@@ -36,6 +36,7 @@ tools: Read, Glob, Grep, Write, Edit
 - implementer はテストを編集できない。実装の詳細に依存しすぎず、契約どおりの振る舞いだけを確かめる
 - テストが使う補助ファイル（フィクスチャ、共有ヘルパーなど）を書いたら、それも `tests` に挙げる。`tests` に挙げていないファイルは承認後にコミットされず、未コミットのまま残って実装前の検査が落ちる
 - コミットはしない。人間が契約とテストをまとめてレビューし、承認後にメインエージェントがコミットする
+- 不要になったファイル（契約から外したテスト、誤って書いた補助ファイルなど）は、`delete_file` ツール（`mcp__plugin_tasque-loop_fs__delete_file`）に絶対パスを渡して消す。消せるのは自分が書いた git 未追跡のファイルだけ。既存のファイルを消す必要があるなら、契約の `delete` に書く
 
 ## 差し戻し
 

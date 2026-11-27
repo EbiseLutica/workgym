@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DELETE_TOOL } from "../scripts/lib/discard.mjs";
 import { decide, defaultIsIgnored, IMPLEMENTER, toProjectRelative } from "../scripts/lib/guard.mjs";
 import { approvePlan } from "../scripts/lib/run.mjs";
 import { approvableProject, decidedPlan } from "./helpers.mjs";
@@ -271,4 +272,37 @@ test("planner は保護パスに書けず、下書きとテストは書ける", 
     assert.equal(run(write(join(projectDir, p), planner)), null, p);
   }
   assert.equal(run(call("Read", { file_path: join(projectDir, ".tasque", "current") }, planner)), null);
+});
+
+const del = (file, extra = {}) => call(DELETE_TOOL, { file_path: file }, extra);
+const allowed = (r) => r?.hookSpecificOutput?.permissionDecision === "allow";
+
+test("削除ツール: implementer は書き込みと同じ判定を通れば許可される", () => {
+  assert.ok(allowed(run(del(join(projectDir, "src", "config", "load.ts")))));
+  assert.ok(denied(run(del(join(projectDir, "src", "cli.ts")))));
+  assert.ok(denied(run(del(join(projectDir, "test", "config.test.ts")), { loadTask: wide() })));
+  assert.ok(denied(run(del(join(projectDir, ".tasque", "current")), { loadTask: wide() })));
+  assert.ok(denied(run(del(join(projectDir, ".gitignore")), { loadTask: wide() })));
+  assert.ok(denied(run(del(join(projectDir, "..", "x.ts")), { loadTask: wide() })));
+  assert.ok(denied(run(del(join(projectDir, "src", "a.js")), { loadTask: wide(), isIgnored: () => true })));
+});
+
+test("削除ツール: 相対パスは拒否する（MCP サーバーの cwd がずれうるため）", () => {
+  const r = run(del("src/config/load.ts", { cwd: projectDir }));
+  assert.ok(denied(r));
+  assert.match(r.hookSpecificOutput.permissionDecisionReason, /絶対パス/);
+});
+
+test("削除ツール: planner は保護パスと下書きを消せず、それ以外は許可される", () => {
+  const planner = { agent_type: "tasque-loop:planner" };
+  for (const p of [".tasque/plan.draft.json", ".tasque/current", ".git/config", "src/CLAUDE.md", "tasque.config.json"]) {
+    assert.ok(denied(run(del(join(projectDir, p), planner))), p);
+  }
+  assert.ok(allowed(run(del(join(projectDir, "test", "extra.test.ts"), planner))));
+});
+
+test("削除ツール: planner と implementer 以外は、実行中でなくても拒否する", () => {
+  for (const agent_type of [undefined, "Explore", "tasque-loop:reviewer"]) {
+    assert.ok(denied(run(del(join(projectDir, "src", "config", "load.ts"), { agent_type }), { active: false })), agent_type);
+  }
 });
