@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isAllowed, isSamePath, isTestPath, portablePathError, validatePlan } from "../scripts/lib/contract.mjs";
+import { isAllowed, isTestPath, validatePlan } from "../scripts/lib/contract.mjs";
 
 const example = () =>
   JSON.parse(readFileSync(new URL("../examples/plan.example.json", import.meta.url), "utf8"));
@@ -131,22 +131,18 @@ test("acceptance の cwd は任意で、正規形のプロジェクト相対パ�
   }
 });
 
-test("isSamePath・isTestPath は大文字小文字と Unicode 正規化の違いを同一視する", () => {
-  assert.equal(isSamePath("Test/A.ts", "test/a.ts"), true);
-  assert.equal(isSamePath("test/が.ts", "test/か\u3099.ts"), true);
-  assert.equal(isSamePath("test/a.ts", "test/b.ts"), false);
+test("isTestPath は大文字小文字の違いを同一視する", () => {
   const plan = example();
   assert.equal(isTestPath("TEST/CLI.test.ts", plan), true);
   assert.equal(isTestPath("test/cli.test.ts", plan.tasks.slice(0, 1)), false);
 });
 
-test("portablePathError は Windows で扱えない名前を指摘し、普通の名前は通す", () => {
-  for (const p of ["src/index.ts", "docs/a.b.md", ".gitignore", "src/console.ts", "src/con-fig.ts"]) {
-    assert.equal(portablePathError(p), null, p);
-  }
-  for (const p of ["src/a\b.ts", "src/a:b.ts", "src/a?.ts", "src/a|b", "src/a\tb", "src/x.", "src/x ", "con", "src/NUL.txt", "lpt1/x", "com9.log"]) {
-    assert.notEqual(portablePathError(p), null, p);
-  }
+test("isAllowed の deny は Unicode 正規化の違い（NFD）でもすり抜けられない", () => {
+  const task = { allow: ["src/**"], deny: ["src/秘密/**", "src/が.ts"] };
+  assert.equal(isAllowed("src/秘密/a.ts", task), false);
+  assert.equal(isAllowed("src/が.ts".normalize("NFD"), task), false);
+  assert.equal(isAllowed("src/が.ts", task), false);
+  assert.equal(isAllowed("src/か.ts", task), true);
 });
 
 test("delete: 1ファイルずつ正規形で書き、保護パスと受け入れテストは消せない", () => {

@@ -1,18 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveProjectDir } from "../scripts/lib/git.mjs";
 import { decideHook, IMPLEMENTER } from "../scripts/lib/guard.mjs";
+import { isSameDir } from "../scripts/lib/paths.mjs";
 import { approvePlan } from "../scripts/lib/run.mjs";
 import { verifyBaseline } from "../scripts/lib/verify.mjs";
 import { decidedPlan, examplePlan, makeRepo } from "./helpers.mjs";
 
-const real = (p) => realpathSync.native(p).toLowerCase();
-const same = (a, b) => assert.equal(real(a), real(b));
+const same = (a, b) => assert.ok(isSameDir(a, b), `${a} と ${b} は同じディレクトリではない`);
 const script = (name) => fileURLToPath(new URL(`../scripts/${name}`, import.meta.url));
 
 /**

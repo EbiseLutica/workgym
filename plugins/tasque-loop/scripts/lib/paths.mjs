@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
 /**
  * パスの比較・照合・変換をまとめたライブラリ。パスを扱うコードは、比較用の正規化や正式な名前への変換を自前で書かず、ここを使う。
@@ -20,6 +20,18 @@ export function toNfcLowerPath(p) {
  */
 export function isSamePath(a, b) {
   return toNfcLowerPath(a) === toNfcLowerPath(b);
+}
+
+/**
+ * 2つの実在するディレクトリが同じかを返す。どちらも realpath で正式な名前に直し、Windows では大文字小文字を無視して比べる。
+ * 実在しないパスは例外。
+ */
+export function isSameDir(a, b) {
+  const norm = (p) => {
+    const real = realpathSync.native(p);
+    return process.platform === "win32" ? real.toLowerCase() : real;
+  };
+  return norm(a) === norm(b);
 }
 
 /**
@@ -105,4 +117,40 @@ export function suspiciousComponent(parts, { shortName }) {
         (c.includes(":") || /[.\s]$/.test(c) || (shortName && /~\d/.test(c))),
     ) ?? null
   );
+}
+
+const GLOB_CHARS = /[*?[\]{}]/;
+
+/**
+ * 契約や設定に書くプロジェクト相対パスの正規形を検査し、問題があればメッセージを返す。正規形なら null。
+ * 照合は文字列のまま行うため、`./` や `//`、末尾の `/` などの書き方の揺れは黙って直さずに拒否する。
+ * glob: false なら glob の特殊文字も拒否する（テストファイルや作業ディレクトリのように1つのパスを指すもの）。
+ */
+export function canonicalPathError(p, { glob = true } = {}) {
+  if (p.includes("\\")) return "区切りは / を使う";
+  if (posix.isAbsolute(p) || /^[A-Za-z]:/.test(p)) return "プロジェクトルートからの相対パスにする";
+  const parts = p.split("/");
+  if (parts.includes("..")) return ".. は使えない";
+  if (parts.includes(".")) return ". は使えない（先頭の ./ も書かない）";
+  if (parts.includes("")) return "空の要素がある（// や末尾の / を書かない）";
+  if (!glob && GLOB_CHARS.test(p)) return "glob の特殊文字（* ? [ ] { }）は使えない";
+  return null;
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
+/**
+ * プロジェクト相対パスが、どの OS でも同じファイルとして扱える名前かを確かめる。問題がなければ null。
+ * POSIX で作れても Windows で扱えない名前（git に載せると Windows で壊れる）を止める。
+ * - Windows で使えない文字（\ : * ? " < > | と制御文字）
+ * - 末尾のドットや空白
+ * - Windows の予約名（CON、NUL、COM1 など。拡張子つきも含む）
+ */
+export function portablePathError(p) {
+  for (const part of p.split("/")) {
+    if (/[\\:*?"<>|\x00-\x1f]/.test(part)) return `「${part}」に Windows で使えない文字がある`;
+    if (/[.\s]$/.test(part) && part !== "." && part !== "..") return `「${part}」がドットか空白で終わる`;
+    if (WINDOWS_RESERVED.test(part)) return `「${part}」は Windows の予約名`;
+  }
+  return null;
 }

@@ -3,16 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runCommand } from "./command.mjs";
 import { CONFIG_FILE, loadConfig, testCommand } from "./config.mjs";
-import {
-  isAllowed,
-  isDeclaredDelete,
-  isSamePath,
-  isTestPath,
-  matchesAny,
-  portablePathError,
-  validatePlan,
-} from "./contract.mjs";
+import { isAllowed, isDeclaredDelete, isTestPath, matchesAny, validatePlan } from "./contract.mjs";
 import { currentBranch, git, headCommit, isIgnored, isOutsideProject, isTrackedAs, repoLayout } from "./git.mjs";
+import { isSamePath, portablePathError } from "./paths.mjs";
 import { draftDigest, draftPaths } from "./plan-check.mjs";
 import { baselinePath, loadApproval, runPaths, sha256Of, taskFile } from "./run.mjs";
 

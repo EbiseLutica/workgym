@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalPathError } from "./contract.mjs";
+import { canonicalPathError } from "./paths.mjs";
 
 export const CONFIG_FILE = "tasque.config.json";
 

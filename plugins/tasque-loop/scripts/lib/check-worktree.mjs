@@ -1,6 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./git.mjs";
+import { isSameDir } from "./paths.mjs";
 
 /**
  * cwd が後片付けしてよいワークツリーの中か（リンクされたワークツリーで、.tasque/current がなく、未コミットの変更がないか）を調べる。
@@ -13,7 +14,7 @@ export function checkWorktree(cwd) {
   const [gitDir, commonDir] = git(cwd, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])
     .split(/\r?\n/);
   const reasons = [];
-  if (sameDir(gitDir, commonDir)) {
+  if (isSameDir(gitDir, commonDir)) {
     reasons.push("リンクされたワークツリーの中ではない（元のチェックアウトで実行している）");
   }
   if (existsSync(join(cwd, ".tasque", "current"))) {
@@ -23,12 +24,4 @@ export function checkWorktree(cwd) {
     reasons.push("コミットされていない変更がある");
   }
   return reasons;
-}
-
-function sameDir(a, b) {
-  const norm = (p) => {
-    const real = realpathSync.native(p);
-    return process.platform === "win32" ? real.toLowerCase() : real;
-  };
-  return norm(a) === norm(b);
 }

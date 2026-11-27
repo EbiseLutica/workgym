@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { isSamePath, toNfcLowerPath } from "./paths.mjs";
+import { canonicalPathError, isSamePath, toNfcLowerPath } from "./paths.mjs";
 
 /**
  * 契約の検証段階。
@@ -15,8 +15,6 @@ export const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** タスク ID の形式。ファイル名に使うため run id と同じ制約にする。 */
 export const TASK_ID = RUN_ID;
 
-const GLOB_CHARS = /[*?[\]{}]/;
-
 /**
  * パスが glob のいずれかに一致するかを返す。パスはプロジェクトルートからの POSIX 相対パスを前提とする。
  */
@@ -26,18 +24,14 @@ export function matchesAny(path, globs) {
 
 /**
  * パスが allow に一致し、deny に一致しないかを返す。
- * 大文字小文字を区別しないファイルシステムで deny をすり抜けられないよう、deny は小文字に揃えて照合する。
- * allow は区別したままにする（大文字小文字が違えば許可されないので、拒否側に倒れる）。
+ * 大文字小文字の違いや Unicode の正規化の違い（macOS の NFD など）で deny をすり抜けられないよう、
+ * deny はパスと glob の両方を toNfcLowerPath で揃えて照合する。
+ * allow は揃えずに照合する（書き方が違えば許可されないので、拒否側に倒れる）。
  */
 export function isAllowed(path, task) {
-  const deny = (task.deny ?? []).map((g) => g.toLowerCase());
-  return matchesAny(path, task.allow) && !matchesAny(path.toLowerCase(), deny);
+  const deny = (task.deny ?? []).map(toNfcLowerPath);
+  return matchesAny(path, task.allow) && !matchesAny(toNfcLowerPath(path), deny);
 }
-
-/**
- * 2つのプロジェクト相対パスが同じファイルを指しうるかを返す（本体は paths.mjs）。テストファイルの照合はすべてこの関数を通す。
- */
-export { isSamePath };
 
 /**
  * パスがどれかのタスクの受け入れテストなら、そのタスクを返す。なければ undefined。
@@ -53,40 +47,6 @@ export function testOwner(path, planOrTasks) {
  */
 export function isTestPath(path, planOrTasks) {
   return testOwner(path, planOrTasks) !== undefined;
-}
-
-/**
- * 契約に書くパスの正規形を検査し、問題があればメッセージを返す。正規形なら null。
- * 照合は文字列のまま行うため、`./` や `//`、末尾の `/` などの書き方の揺れは黙って直さずに拒否する。
- * glob: false なら glob の特殊文字も拒否する（テストファイルや作業ディレクトリのように1つのパスを指すもの）。
- */
-export function canonicalPathError(p, { glob = true } = {}) {
-  if (p.includes("\\")) return "区切りは / を使う";
-  if (posix.isAbsolute(p) || /^[A-Za-z]:/.test(p)) return "プロジェクトルートからの相対パスにする";
-  const parts = p.split("/");
-  if (parts.includes("..")) return ".. は使えない";
-  if (parts.includes(".")) return ". は使えない（先頭の ./ も書かない）";
-  if (parts.includes("")) return "空の要素がある（// や末尾の / を書かない）";
-  if (!glob && GLOB_CHARS.test(p)) return "glob の特殊文字（* ? [ ] { }）は使えない";
-  return null;
-}
-
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
-
-/**
- * プロジェクト相対パスが、どの OS でも同じファイルとして扱える名前かを確かめる。問題がなければ null。
- * POSIX で作れても Windows で扱えない名前（git に載せると Windows で壊れる）を止める。
- * - Windows で使えない文字（\ : * ? " < > | と制御文字）
- * - 末尾のドットや空白
- * - Windows の予約名（CON、NUL、COM1 など。拡張子つきも含む）
- */
-export function portablePathError(p) {
-  for (const part of p.split("/")) {
-    if (/[\\:*?"<>|\x00-\x1f]/.test(part)) return `「${part}」に Windows で使えない文字がある`;
-    if (/[.\s]$/.test(part) && part !== "." && part !== "..") return `「${part}」がドットか空白で終わる`;
-    if (WINDOWS_RESERVED.test(part)) return `「${part}」は Windows の予約名`;
-  }
-  return null;
 }
 
 /**

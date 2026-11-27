@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalPathError, validatePlan } from "./contract.mjs";
+import { validatePlan } from "./contract.mjs";
 import { isTrackedAs } from "./git.mjs";
+import { canonicalPathError } from "./paths.mjs";
 
 export const PLANNER = "tasque-loop:planner";
 export const MAX_ATTEMPTS = 3;
