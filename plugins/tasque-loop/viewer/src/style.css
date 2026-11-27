@@ -167,3 +167,8 @@ body {
 .hljs-deletion {
   color: var(--danger);
 }
+
+.tv-next {
+  display: flex;
+  justify-content: flex-end;
+}

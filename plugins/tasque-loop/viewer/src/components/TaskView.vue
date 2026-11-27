@@ -2,18 +2,16 @@
 import CodeBlock from "./CodeBlock.vue";
 
 defineProps({ task: { type: Object, required: true } });
-
-const chipFor = (status) => (status === "fail" ? "lu-chip--success" : "lu-chip--warning");
 </script>
 
 <template>
   <section class="lu-card lu-stack lu-stack--gap-2">
     <h2 class="tv-section-title">{{ task.id }}: {{ task.title }}</h2>
     <p class="tv-goal tv-prewrap">{{ task.goal }}</p>
-    <div class="lu-stack lu-stack--horizontal lu-stack--wrap lu-stack--gap-1">
-      <span class="lu-chip lu-chip--dimmed">上限 {{ task.max_diff?.lines }} 行 / {{ task.max_diff?.files }} ファイル</span>
-      <span v-if="task.depends_on?.length" class="lu-chip lu-chip--dimmed">依存 {{ task.depends_on.join(", ") }}</span>
-    </div>
+    <p class="tv-dim">
+      上限 {{ task.max_diff?.lines }} 行 / {{ task.max_diff?.files }} ファイル
+      <template v-if="task.depends_on?.length"> ・ 依存 {{ task.depends_on.join(", ") }}</template>
+    </p>
   </section>
 
   <section v-if="task.uncertain?.length" class="lu-card lu-stack lu-stack--gap-2">
@@ -65,7 +63,7 @@ const chipFor = (status) => (status === "fail" ? "lu-chip--success" : "lu-chip--
       <p class="tv-cmd"><code>{{ a.cmd }}</code></p>
       <p class="tv-dim">{{ a.why }}<template v-if="a.cwd">（{{ a.cwd }} で実行）</template></p>
       <template v-if="a.result">
-        <p><span class="lu-chip" :class="chipFor(a.result.status)">{{ a.result.mark }}</span></p>
+        <p v-if="a.result.status !== 'fail'"><span class="lu-chip lu-chip--warning">{{ a.result.mark }}</span></p>
         <details v-if="a.result.stdout?.trim() || a.result.stderr?.trim()" class="tv-details">
           <summary>コマンドの出力（末尾）</summary>
           <pre v-if="a.result.stdout?.trim()" class="tv-output">{{ a.result.stdout.trimEnd() }}</pre>

@@ -10,6 +10,19 @@ const tab = ref("overview");
 const current = computed(() => tasks.value.find((t) => t.id === tab.value) ?? null);
 
 /**
+ * 今のタブの次に読むタスク。最後のタスクなら null。
+ */
+const next = computed(() => {
+  const i = current.value === null ? -1 : tasks.value.indexOf(current.value);
+  return tasks.value[i + 1] ?? null;
+});
+
+const open = (id) => {
+  tab.value = id;
+  window.scrollTo({ top: 0 });
+};
+
+/**
  * 検査結果と Red 確認が、今の契約とテストを見て作られたか。どれかのハッシュが違えば、承認は拒否される。
  */
 const stale = computed(() => {
@@ -68,7 +81,7 @@ const stale = computed(() => {
         class="lu-tabbar__tab"
         role="tab"
         :aria-selected="tab === 'overview'"
-        @click="tab = 'overview'"
+        @click="open('overview')"
       >
         概要
       </button>
@@ -78,13 +91,19 @@ const stale = computed(() => {
         class="lu-tabbar__tab"
         role="tab"
         :aria-selected="tab === t.id"
-        @click="tab = t.id"
+        @click="open(t.id)"
       >
         {{ t.id }}
       </button>
     </nav>
 
-    <OverviewView v-if="current === null" :data="data" @open="tab = $event" />
+    <OverviewView v-if="current === null" :data="data" @open="open" />
     <TaskView v-else :key="current.id" :task="current" />
+
+    <div v-if="next" class="tv-next">
+      <button type="button" class="lu-button lu-button--primary" @click="open(next.id)">
+        次へ: {{ next.id }}
+      </button>
+    </div>
   </main>
 </template>
