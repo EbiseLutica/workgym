@@ -453,3 +453,22 @@ test("delete: pr は契約どおりの削除を上限に数えず、宣言のな
   git("commit", "-q", "-m", "宣言のない削除");
   assert.ok(failed(await verifyPr(dir, RUN)).includes("scope"));
 });
+
+test("テストのないタスク: 契約・Red 確認・承認・pre・post・pr がテストのコミットなしで通る", async () => {
+  const t = task("T1", { allow: ["docs/**"], tests: [], acceptance: [], goal: "docs/guide.md に導入手順を足す" });
+  const plan = { version: 1, run: RUN, request: "導入手順を書く", base: "main", tasks: [t] };
+  const { dir, put, git } = makeRepo({ files: { "docs/guide.md": "# guide\n" } });
+  await verifyBaseline(dir);
+  put(".tasque/plan.draft.json", JSON.stringify(plan));
+  const red = await verifyRed(dir);
+  assert.deepEqual(red.results, []);
+  assert.deepEqual(red.warnings, []);
+  approvePlan(dir, plan);
+
+  assert.deepEqual(failed(await verifyPre(dir, RUN, "T1")), []);
+  put("docs/guide.md", "# guide\n\n導入手順\n");
+  assert.deepEqual(failed(await verifyPost(dir, RUN, "T1")), []);
+  git("add", "--", "docs/guide.md");
+  git("commit", "-q", "-m", "docs: T1");
+  assert.deepEqual(failed(await verifyPr(dir, RUN)), []);
+});

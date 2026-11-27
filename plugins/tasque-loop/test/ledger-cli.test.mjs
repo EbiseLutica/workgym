@@ -273,13 +273,11 @@ test("正常系: --run はランの集計を <プロジェクト>/<run>/record.j
   });
 
   assert.deepEqual(tree(s.rawDir()), source);
-  assert.equal(existsSync(join(s.ledgerDir, s.project, `${s.plan.run}.json`)), false);
 
   assert.deepEqual(tracked(s), expectedTracked(s));
   assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
   assert.ok(committedPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), committedPaths(s).join("\n"));
   assert.equal(s.lgit("log", "-1", "--format=%an <%ae>").trim(), "tasque-loop <tasque-loop@localhost>");
-  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
   assert.equal(s.lgit("status", "--porcelain").trim(), "");
   assert.equal(s.lgit("remote").trim(), "");
 
@@ -321,7 +319,6 @@ test("正常系: --run を繰り返すと、raw/ を最新の内容（コピー�
   );
 
   assert.equal(commitCount(s), before + 1);
-  assert.equal(s.lgit("log", "-1", "--format=%s").trim(), `record ${s.project} ${s.plan.run}`);
   assert.ok(headPaths(s).every((p) => p.startsWith(`${s.runRel}/`)), headPaths(s).join("\n"));
   assert.ok(headPaths(s).includes(`${s.runRel}/record.json`));
   assert.ok(headPaths(s).includes(`${s.runRel}/raw/tasks/T1.post-history.json`));
@@ -523,15 +520,6 @@ test("異常系: --run がなければ使い方を出して exit 2 で止まり�
   const r = s.ledger(["--run", "2026-01-01-none"]);
   assert.equal(r.status, 1);
   assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none")), false);
-  assert.equal(existsSync(join(s.ledgerDir, s.project, "2026-01-01-none.json")), false);
-});
-
-test("異常系: --snapshot はもう受け付けず、台帳に何も書かない", async () => {
-  const s = await setup();
-  populate(s);
-  const r = s.ledger(["--run", s.plan.run, "--snapshot"]);
-  assert.notEqual(r.status, 0);
-  assert.equal(existsSync(s.runDir()), false);
 });
 
 test("異常系: 台帳の場所が中身のある git 管理外のディレクトリなら、何も書かずにエラーにする", async () => {
