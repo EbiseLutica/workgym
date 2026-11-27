@@ -14,7 +14,7 @@
 1. Claude Code のワークツリーに入った直後に `verify --phase baseline` を走らせ、基点を記録する
 2. planner が `.tasque/plan.draft.json`（契約の下書き）と受け入れテストを書く。SubagentStop フックが下書きを検査し、不正なら差し戻す（最大2回）。結果は `.tasque/plan.draft.check.json`
 3. `verify --phase red` で、実装前の受け入れコマンドが落ちることを確かめる。結果は `.tasque/plan.draft.red.json`
-4. 人間が契約・テスト・Red 確認の出力をレビューする。直してほしい点があれば planner に戻して 2 からやり直す
+4. `render-review.mjs` が契約・テスト・Red 確認の結果をレビュー用のページ（`.tasque/tmp/review.html`）にまとめ、人間がそれを見てレビューする。直してほしい点があれば planner に戻して 2 からやり直す
 5. 人間が承認したら、メインエージェントが人間の言葉をそのまま `uncertain` の `decision` に書き、`approve.mjs` で承認する。続けて、契約の `tests` に挙げたパスだけを明示してテストをコミットする
 6. タスクごとに、`verify --phase pre` → implementer が実装 → `verify --phase post` → 観点別の reviewer によるレビュー（最大2ラウンド）→ 1タスク1コミット
 7. 全タスクが終わったら `verify --phase pr` を通し、PR を作る。セッションはワークツリーに残ったまま終わる
@@ -79,4 +79,5 @@ Claude Code は worktree に入っても `CLAUDE_PROJECT_DIR` を元のリポジ
 ## 注意
 
 - `red`・`post`・`pr` は planner や implementer が書いたコードを実行します。Claude Code のサンドボックス（macOS・Linux・WSL2）を有効にして使うことを勧めます。ネイティブの Windows にはサンドボックスがなく、特に `red` は人間の承認前、つまりレビュー前のコードを実行します
+- レビュー用のページのビューア（`viewer/`、Vite + Vue）を変えたら、`viewer/` で `npm ci && npm run build` を実行し、ビルド結果の `viewer/dist/review.html` もコミットしてください。プラグインを使う側はビルドせず、この HTML をそのまま使います
 - スキルを使わずに手で回す場合も、テストのコミットは `git add -A` ではなく、契約の `tests` に挙げたパスを明示して行ってください（意図しないファイルまで基点に入るのを防ぐため）

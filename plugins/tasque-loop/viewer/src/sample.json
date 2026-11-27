@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-27T05:00:00.000Z",
+  "integrity": { "draft": "abc", "check": "abc", "red": "abc" },
+  "check": { "ok": true, "errors": [] },
+  "red": { "warnings": ["T2: `npm test -- cli` — ⚠ 実装前から通った"] },
+  "run": "2026-11-27-a1b2",
+  "request": "設定ファイル tasque.config.json を読めるようにしてほしい。\nキーが足りないときは既定値で動くこと。",
+  "base": "main",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "設定ファイルの読み込みを追加",
+      "goal": "tasque.config.json を読み、未指定のキーは既定値で補う",
+      "depends_on": [],
+      "allow": ["src/config/**", "src/index.ts"],
+      "deny": ["src/config/generated/**"],
+      "delete": ["src/legacy-config.ts"],
+      "out_of_scope": ["CLI 引数の追加は T2 でやる", "既存の設定キーの名前は変えない"],
+      "max_diff": { "lines": 150, "files": 4 },
+      "uncertain": [{ "q": "設定ファイルが存在しないときにエラーにするか、既定値で動くか", "raised_by": "planner", "decision": null }],
+      "acceptance": [
+        {
+          "cmd": "npm test -- config",
+          "why": "既定値の補完と不正値の拒否",
+          "result": { "status": "fail", "mark": "✖ Red（exit 1）", "cwd": ".", "stdout": "not ok 1 - 既定値で補う\n  Error: Cannot find module '../src/config/load'", "stderr": "" }
+        }
+      ],
+      "tests": [
+        {
+          "path": "test/config.test.ts",
+          "language": "typescript",
+          "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { loadConfig } from \"../src/config/load\";\n\n// 未指定のキーは既定値で補う\ntest(\"既定値で補う\", () => {\n  const config = loadConfig({});\n  assert.equal(config.timeout, 30);\n  assert.equal(config.name, \"<default>\");\n});\n",
+          "truncated": false
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "--config 引数で設定ファイルの場所を指定できるようにする",
+      "goal": "CLI 引数 --config <path> で読み込む設定ファイルを差し替えられる",
+      "depends_on": [],
+      "allow": ["src/cli.ts"],
+      "out_of_scope": ["設定の読み込み処理そのものは変えない"],
+      "max_diff": { "lines": 60, "files": 2 },
+      "uncertain": [],
+      "acceptance": [
+        {
+          "cmd": "npm test -- cli",
+          "why": "--config 指定時と未指定時の読み込み先",
+          "result": { "status": "pass", "mark": "⚠ 実装前から通った", "cwd": ".", "stdout": "ok 1 - cli", "stderr": "" }
+        }
+      ],
+      "tests": [{ "path": "test/cli.test.ts", "language": "typescript", "missing": true }]
+    },
+    {
+      "id": "T3",
+      "title": "README に設定ファイルの説明を足す",
+      "goal": "README の「設定」節に、tasque.config.json のキーと既定値の一覧を足す",
+      "depends_on": [],
+      "allow": ["README.md"],
+      "out_of_scope": [],
+      "max_diff": { "lines": 40, "files": 1 },
+      "uncertain": [],
+      "acceptance": [],
+      "tests": []
+    }
+  ]
+}
