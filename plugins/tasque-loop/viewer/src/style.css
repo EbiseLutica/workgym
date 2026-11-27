@@ -1,0 +1,174 @@
+/* フォントファイルは積まず、OS のフォントで表示する（ファイルとして送るので軽くしたい） */
+:root {
+  --font-sans: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+}
+
+.tv-header {
+  padding: var(--space-6) 0 var(--space-4);
+}
+.tv-eyebrow {
+  margin: 0;
+  color: var(--dimmed);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+.tv-title {
+  margin: 0;
+  font-size: var(--text-h2);
+  overflow-wrap: anywhere;
+}
+.tv-meta {
+  margin: var(--space-1) 0 0;
+  color: var(--dimmed);
+  font-size: var(--text-small);
+}
+.tv-main {
+  padding-bottom: var(--space-12);
+}
+
+@media (max-width: 600px) {
+  .lu-card {
+    padding: var(--space-4);
+  }
+}
+
+.tv-section-title {
+  margin: 0;
+  font-size: var(--text-h4);
+}
+.tv-label {
+  margin: 0 0 var(--space-1);
+  color: var(--dimmed);
+  font-size: var(--text-small);
+}
+.tv-label--danger {
+  color: var(--danger);
+}
+.tv-prewrap {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tv-dim {
+  margin: 0;
+  color: var(--dimmed);
+  font-size: var(--text-small);
+}
+.tv-list {
+  margin: 0;
+  padding-inline-start: 1.4em;
+}
+.tv-paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.tv-decision {
+  display: block;
+  color: var(--success);
+}
+
+.tv-task-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.tv-task-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.tv-task-id {
+  color: var(--primary);
+  font-weight: 700;
+}
+.tv-task-title {
+  color: var(--foreground-strong);
+  font-weight: 700;
+}
+.tv-goal {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+}
+
+.tv-cmd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.tv-details > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.tv-details[open] > summary {
+  margin-bottom: var(--space-2);
+}
+.tv-missing {
+  margin: 0;
+  color: var(--danger);
+}
+.tv-output {
+  margin: var(--space-2) 0 0;
+  max-height: 24em;
+  font-size: var(--text-small);
+}
+.tv-output--stderr {
+  color: var(--danger);
+}
+.tv-code {
+  margin: 0;
+  max-height: 40em;
+  background: var(--background);
+}
+
+/* ハイライトの配色。Lutica のトークンから選び、light と dark の両方で読めるようにする */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-literal,
+.hljs-type {
+  color: var(--primary);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--success);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-variable.constant_,
+.hljs-attr {
+  color: var(--warning);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--dimmed);
+  font-style: italic;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--foreground-strong);
+  font-weight: 600;
+}
+.hljs-deletion {
+  color: var(--danger);
+}
+
+.tv-next {
+  display: flex;
+  justify-content: flex-end;
+}
