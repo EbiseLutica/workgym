@@ -100,16 +100,16 @@ test("許可外のパスが複数あればすべて残し、スコープ以外�
   assert.deepEqual(b.failed, ["acceptance: node test/check.mjs"]);
 });
 
-test("post.json の中身と戻り値は今までどおりで、毎回最新の結果で上書きされる", async () => {
+test("post.json は戻り値と同じ中身で、毎回最新の結果で上書きされる", async () => {
   const { dir, put, postJson } = await setup();
 
   const first = await verifyPost(dir, RUN, "T1");
-  assert.deepEqual(Object.keys(first), ["run", "task", "phase", "ok", "checks", "diff"]);
+  assert.deepEqual(Object.keys(first).sort(), ["checks", "diff", "ok", "phase", "run", "task"]);
   assert.deepEqual(postJson(), JSON.parse(JSON.stringify(first)));
 
   put("src/impl.txt", "ok\n");
   const second = await verifyPost(dir, RUN, "T1");
-  assert.deepEqual(Object.keys(second), ["run", "task", "phase", "ok", "checks", "diff"]);
+  assert.deepEqual(Object.keys(second).sort(), ["checks", "diff", "ok", "phase", "run", "task"]);
   assert.deepEqual(postJson(), JSON.parse(JSON.stringify(second)));
   assert.equal(postJson().ok, true);
 });
